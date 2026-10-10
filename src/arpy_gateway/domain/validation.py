@@ -133,4 +133,86 @@ def validate_project(project: ProjectSnapshot) -> Tuple[ValidationIssue, ...]:
     if visited != len(indegree):
         err("MAPPING_CYCLE", "project", project.project_id, "Telemetry mapping graph has a cycle")
 
+    problems.extend(_validate_server_address_scopes(project, instances))
     return tuple(problems)
+
+
+def _validate_server_address_scopes(project: ProjectSnapshot, instances: dict) -> list[ValidationIssue]:
+    """Conservative server address collision check, O(S log S) for interval ranges.
+
+    This is NOT a replacement for adapter-owned protocol validation. Input/client
+    polling points may legitimately read overlapping registers. All server
+    output points must have unambiguous addressing unless future adapter policy
+    explicitly supports aliases. IEC-104 monitors/controls use separate direction
+    namespaces here; each adapter will validate exact TI and packet semantics.
+    """
+    issues: list[ValidationIssue] = []
+    seen_iec: dict[tuple, str] = {}
+    modbus_ranges: dict[tuple, list[tuple[int, int, str]]] = defaultdict(list)
+
+    for sig in project.signals:
+        inst = instances.get(sig.instance_id)
+        if not sig.enabled or inst is None or not inst.enabled:
+            continue
+        if inst.role.value != "server":
+            continue
+        p = sig.parameters
+
+        if inst.protocol == "iec104":
+            try:
+                ca = int(p.get("common_address", inst.settings.get("common_address")))
+                ioa = int(p["ioa"])
+                if not (1 <= ca <= 65534 and 0 <= ioa <= 16777215):
+                    raise ValueError("IEC-104 CA/IOA out of protocol range")
+            except (KeyError, TypeError, ValueError, OverflowError):
+                issues.append(ValidationIssue("ADDRESS_INVALID", "signal", sig.id,
+                                              "IEC-104 server requires valid Common Address and IOA"))
+                continue
+            scope = (inst.id, ca, ioa, sig.direction.value)
+            if scope in seen_iec:
+                issues.append(ValidationIssue("ADDRESS_COLLISION", "signal", sig.id,
+                                              "IEC-104 CA/IOA direction already owned by " + seen_iec[scope]))
+            else:
+                seen_iec[scope] = sig.id
+
+        elif inst.protocol in ("modbus_tcp", "modbus_rtu"):
+            if sig.direction is SignalDirection.INBOUND:
+                continue  # incoming write target and read-only input need adapter-specific policy
+            table = p.get("register_table")
+            if table not in ("coil", "discrete", "holding", "input"):
+                issues.append(ValidationIssue("ADDRESS_INVALID", "signal", sig.id,
+                                              "Modbus register table must be coil/discrete/holding/input"))
+                continue
+            try:
+                addr = int(p["native_address"])
+                unit = int(p.get("unit_id", inst.settings.get("unit_id", 1)))
+                if "register_count" in p:
+                    count = int(p["register_count"])
+                else:
+                    count = {ValueType.INT32: 2, ValueType.UINT32: 2,
+                             ValueType.FLOAT32: 2, ValueType.INT64: 4,
+                             ValueType.UINT64: 4, ValueType.FLOAT64: 4}.get(sig.value_type, 1)
+                if table in ("coil", "discrete") and count != 1:
+                    raise ValueError("Bit table points must have width one")
+                if not (0 <= addr <= 65535 and 1 <= count <= 125 and addr + count <= 65536
+                        and 0 <= unit <= 255):
+                    raise ValueError("Modbus address/width/Unit ID out of range")
+            except (KeyError, TypeError, ValueError, OverflowError):
+                issues.append(ValidationIssue("ADDRESS_INVALID", "signal", sig.id,
+                                              "Modbus server requires valid PDU native address, count and Unit ID"))
+                continue
+            key = (inst.id, unit, table)
+            modbus_ranges[key].append((addr, addr + count, sig.id))
+
+    for ranges in modbus_ranges.values():
+        ranges.sort(key=lambda r: (r[0], r[1], r[2]))
+        prev_end = -1
+        prev_id = ""
+        for start, end, sid in ranges:
+            if start < prev_end:
+                issues.append(ValidationIssue("ADDRESS_COLLISION", "signal", sid,
+                                              "Modbus server register range overlaps " + prev_id))
+            if end > prev_end:
+                prev_end = end
+                prev_id = sid
+    return issues
