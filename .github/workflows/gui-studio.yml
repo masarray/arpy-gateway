@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/arpy_gateway/studio/**'
       - 'tests/test_studio_gui.py'
+      - 'tests/test_studio_v2.py'
       - '.github/workflows/gui-studio.yml'
       - 'pyproject.toml'
   workflow_dispatch:
@@ -56,12 +57,44 @@ jobs:
           gui = StudioV2Window(provider)
           gui.show()
           gui.navigation.setCurrentRow(2)
+          meter02 = gui.tree_model.find('meter01:ied:2')
+          gui.tree.setCurrentIndex(meter02)
           def shot():
               path = Path('artifacts/arpy-studio-500k-signal-editor.png')
               path.parent.mkdir(parents=True, exist_ok=True)
               ok = gui.grab().save(str(path))
               app.exit(0 if ok else 2)
           QTimer.singleShot(2300, shot)
+          raise SystemExit(app.exec())
+          PY
+      - name: Capture communication explorer and dark mode
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QTimer
+          from PySide6.QtWidgets import QApplication
+          from arpy_gateway.studio.v2_window import StudioV2Window
+          app = QApplication([])
+          win = StudioV2Window()
+          win.show()
+          win.navigation.setCurrentRow(1)
+          win.tree.setCurrentIndex(win.tree_model.find('peers:meter01'))
+          def capture():
+              root = Path('artifacts')
+              root.mkdir(parents=True, exist_ok=True)
+              win.grab().save(str(root / 'arpy-v2-modbus-ied-connections.png'))
+              win.tree.setCurrentIndex(win.tree_model.find('stations:scada104'))
+              win.grab().save(str(root / 'arpy-v2-iec104-asdu-stations.png'))
+              win.navigation.setCurrentRow(2)
+              win.tree.setCurrentIndex(win.tree_model.find('meter01:ied:2'))
+              win.theme.setCurrentIndex(1)
+              def capture_dark():
+                  ok = win.grab().save(str(root / 'arpy-v2-dark-meter02-signals.png'))
+                  app.exit(0 if ok else 2)
+              QTimer.singleShot(1000, capture_dark)
+          QTimer.singleShot(1200, capture)
           raise SystemExit(app.exec())
           PY
       - uses: actions/upload-artifact@v4
