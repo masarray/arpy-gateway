@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/masarray/arpy-gateway/blob/main/contracts/ipc.v1.schema.json",
+  "title": "ARPY local control-plane envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "message_id",
+    "kind",
+    "sent_at",
+    "correlation_id",
+    "payload"
+  ],
+  "properties": {
+    "api_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "enum": [
+        "request",
+        "response",
+        "event",
+        "error"
+      ]
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string"
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}
