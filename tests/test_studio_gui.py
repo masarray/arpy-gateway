@@ -175,6 +175,31 @@ class QtStudioTests(unittest.TestCase):
         self.win.monitor.copy_diagnostics()
         self.assertIn("Runtime connected: NO", QApplication.clipboard().text())
 
+    def test_streamed_10k_by_12_spreadsheet_paste_is_not_on_ui_thread(self):
+        self.win.navigation.setCurrentRow(2)
+        self.demo.resize_demo(100_000)
+        model = self.win.signals.model
+        model.reload()
+        until(lambda: model.total == 100_000, 15)
+        grid = self.win.signals.grid
+        until(lambda: 0 in model._cached)
+        # A real 10,000 x 12 TSV matrix, 120,000 cells in one atomic worker call.
+        rows = []
+        for i in range(10_000):
+            rows.append(
+                f"BulkSignal{i+1:05d}\tanalog\tfloat32\tinbound\tV\t"
+                f"holding\t1\t{i*2}\t2\tbig\tbig\t1"
+            )
+        QApplication.clipboard().setText("\n".join(rows))
+        grid.setCurrentIndex(model.index(0, 0))
+        before = time.monotonic()
+        grid.paste_cells()
+        # This call returns immediately to Qt; parsing and validation run on writer.
+        self.assertLess(time.monotonic() - before, 0.5)
+        until(lambda: self.demo.page("meter01", 9_999, 1)[0][2] == "BulkSignal10000", 40)
+        self.assertEqual(self.demo.page("meter01", 0, 1)[0][2], "BulkSignal00001")
+        self.assertLessEqual(len(self.demo._history), 16)
+
     def test_window_virtual_page_cache_and_stale_generation(self):
         self.win.signals.sizes.setCurrentIndex(2)
         until(lambda: self.win.signals.model.total == 500000, 15)

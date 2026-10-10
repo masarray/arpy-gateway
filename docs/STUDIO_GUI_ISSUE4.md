@@ -16,12 +16,12 @@ Status: **OFFLINE, session-only GUI. No protocol stack, deployed configuration, 
 6. **Value Simulation** — local value preview only. Runtime Start disabled; data **never forwarded**. Actual simulation belongs to Runtime issue #9 after IPC issue #8.
 
 ## Spreadsheet keys
-`Ctrl+C` rectangular TSV to Excel; `Ctrl+V` rectangular TSV from Excel; `Ctrl+D` fill down; `Ctrl+R` fill right; `Ctrl+Z` undo; `Ctrl+Y` redo; type to edit; header sorting; search exact sequence number, e.g. `#12345`. Select integer address column and press **Auto-number selected**. Max 20,000 clipboard/fill cells per action and 50,000 edits per batch. WorkerHub has 2 read workers and 1 ordered writer, max 24 outstanding jobs.
+`Ctrl+C` rectangular TSV to Excel; `Ctrl+V` rectangular TSV from Excel; `Ctrl+D` fill down; `Ctrl+R` fill right; `Ctrl+Z` undo; `Ctrl+Y` redo; type to edit; header sorting; search exact sequence number, e.g. `#12345`. Select integer address column and press **Auto-number selected**. Max 150,000 cells per clipboard/fill action and 150,000 edits per writer transaction. Clipboard TSV parsing is streamed in the writer worker (not the Qt main thread). WorkerHub has 2 read workers and 1 ordered writer, max 24 outstanding jobs.
 
 ## Known limits
 - Demo provider is replaceable and deliberately does not create SQLite tables (owned by STORE issue #3). Edits, endpoint settings and mapping edges disappear on Studio exit. Records generated lazily, not a 500k-row materialization.
 - Demo searching is exact sequence or general voltage/analog/all; arbitrary substring and edited-value-aware sort/filter require indexed STORE implementation. Address sorting uses generated numeric PDU order with Unit ID tie-break; edited addresses do not reorder in preview.
-- Undo history is bounded at 16 **session-only** batches, not durable. Visual FPS requires real Windows test; offscreen tests are not display-speed measurements.
+- Undo history is bounded at 16 batches **and 200,000 cell changes combined**, with at most 300,000 changed demo cells in memory; all **session-only**, not durable. Visual FPS requires real Windows test; offscreen tests are not display-speed measurements.
 - Mapping preview does not edit IOA or register addresses; those belong in Protocol Signals. Runtime mapping compilation and full address collision checks are not yet connected.
 - No protocol sockets and no fabricated live values. Actual command simulation deliberately unavailable.
 
