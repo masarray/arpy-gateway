@@ -206,10 +206,11 @@ class StudioWindow(QMainWindow):
 
     def _single_edit(self, row, col, value):
         view = self.model.view
+        generation = self.model.generation
         # Avoid model reset: spreadsheet selection remains stable while editing.
         self.workers.write(
             lambda: store.apply_grid(self.db_path, view, row, col, [[value]], "Edit cell"),
-            callback=lambda _: self.model.confirm_edit(row, col, value),
+            callback=lambda _: self.model.confirm_edit(row, col, value, generation),
             error=lambda msg: self._failed_edit(row, col, msg),
         )
 

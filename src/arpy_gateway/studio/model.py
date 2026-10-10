@@ -165,8 +165,10 @@ class SignalModel(QAbstractTableModel):
         if count:
             self._request_page(0)
 
-    def confirm_edit(self, row: int, col: int, value: Any) -> None:
+    def confirm_edit(self, row: int, col: int, value: Any, generation: int) -> None:
         """Confirm a cell without resetting selection/focus after every keystroke."""
+        if generation != self.generation:
+            return  # the user sorted/filtered while the worker saved this edit
         self.pending.pop((row, col), None)
         page = row // PAGE_SIZE
         offset = row % PAGE_SIZE
