@@ -1,0 +1,95 @@
+name: Studio GUI - Issue 4
+
+on:
+  push:
+    branches: ['feat/gui-*']
+  pull_request:
+    paths:
+      - 'src/arpy_gateway/studio/**'
+      - 'tests/test_studio_gui.py'
+      - '.github/workflows/gui-studio.yml'
+      - 'pyproject.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-gui-tests:
+    name: Linux Qt / contracts / virtual 500k smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install headless Qt shared libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0
+      - name: Install optional Studio package
+        run: python -m pip install -e ".[studio]"
+      - name: Compile source and tests
+        run: python -m compileall -q src tests
+      - name: Run domain contract and new GUI tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+      - name: Capture offline GUI screenshot
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m arpy_gateway.studio --screenshot artifacts/arpy-studio-gateway-config.png
+      - name: Capture 500k-signal workspace screenshot
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QTimer
+          from PySide6.QtWidgets import QApplication
+          from arpy_gateway.studio.demo import DemoProvider
+          from arpy_gateway.studio.window import StudioWindow
+          app = QApplication([])
+          provider = DemoProvider()
+          provider.resize_demo(500_000)
+          gui = StudioWindow(provider)
+          gui.show()
+          gui.navigation.setCurrentRow(2)
+          def shot():
+              path = Path('artifacts/arpy-studio-500k-signal-editor.png')
+              path.parent.mkdir(parents=True, exist_ok=True)
+              ok = gui.grab().save(str(path))
+              app.exit(0 if ok else 2)
+          QTimer.singleShot(2300, shot)
+          raise SystemExit(app.exec())
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ARPY-Studio-Issue4-QA-Screenshots
+          path: artifacts/*.png
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-preview:
+    name: Windows portable engineering-only EXE
+    needs: linux-gui-tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install GUI and packager
+        run: python -m pip install -e ".[studio]" pyinstaller
+      - name: Build unsigned GUI-only application
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name ARPY-Gateway-Studio-Preview --paths src src/arpy_gateway/studio/launcher.py
+      - name: Upload Windows preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARPY-Gateway-Studio-Issue4-Windows-Preview
+          path: dist/ARPY-Gateway-Studio-Preview.exe
+          if-no-files-found: error
+          retention-days: 14
