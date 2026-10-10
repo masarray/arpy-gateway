@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QApplication, QAbstractItemView, QComboBox,
 
 PAGE = 256
 MAX_PAGES = 24
-MAX_CLIP = 20_000
+MAX_CLIP = 150_000
 
 
 class ChoiceDelegate(QStyledItemDelegate):
@@ -238,7 +238,7 @@ class SignalGrid(QTableView):
         area = selections[0]
         count = area.width() * area.height()
         if count > MAX_CLIP:
-            raise ValueError(f"Clipboard/fill preview limited to {MAX_CLIP:,} cells")
+            raise ValueError(f"Clipboard/fill operation limited to {MAX_CLIP:,} cells")
         return area.top(), area.left(), area.bottom(), area.right()
 
     def copy_cells(self):
@@ -270,33 +270,69 @@ class SignalGrid(QTableView):
         if not idx.isValid():
             return
         text = QApplication.clipboard().text()
-        matrix = list(csv.reader(io.StringIO(text), delimiter="\t"))
-        if matrix and not matrix[-1]:
-            matrix.pop()
-        if not matrix or not any(matrix):
-            return
-        width = len(matrix[0])
-        if width < 1 or any(len(row) != width for row in matrix):
-            self.failure.emit("Clipboard rows must have identical column counts")
+        if not text or len(text) > 12_000_000:
+            self.failure.emit("Clipboard empty or larger than 12 million characters")
             return
         model = self.model()
-        if (len(matrix)*width > MAX_CLIP or idx.row()+len(matrix) > model.total
-                or idx.column()+width > len(model.fields)):
-            self.failure.emit("Paste exceeds selected protocol grid or 20k-cell preview limit")
-            return
         iid, search, desc, sort_key = model.instance_id, model.search, model.descending, model.sort_key
         colkeys = tuple(col.key for col in model.fields)
         top, left = idx.row(), idx.column()
+        # XML/Excel one-cell value may fill the entire selected rectangular range.
+        select = self.selectionModel().selection()
+        repeat = None
+        if len(select) == 1 and select[0].width()*select[0].height() > 1 and (
+                "\t" not in text and "\n" not in text and "\r" not in text):
+            area = select[0]
+            top, left = area.top(), area.left()
+            repeat = (area.height(), area.width())
+            if repeat[0] * repeat[1] > MAX_CLIP:
+                self.failure.emit("Selected fill exceeds 150,000 cells")
+                return
+        provider = model.demo
+
         def work():
+            # Parse the entire clipboard on the WRITE worker, not in the UI loop.
             batch = []
-            for ri, row in enumerate(matrix):
-                sid = model.demo.signal_id(iid,
-                    model.demo.index_for_view(iid, top+ri, search, desc, sort_key))
-                for ci, val in enumerate(row):
-                    batch.append((sid, colkeys[left+ci], val))
-            return model.demo.edit(iid, batch)
+            count_rows = 0
+            width = None
+            if repeat:
+                source = ((text,) * repeat[1] for _ in range(repeat[0]))
+            else:
+                source = csv.reader(io.StringIO(text), delimiter="\t")
+            for row in source:
+                if width is None:
+                    width = len(row)
+                    if width == 0 or left + width > len(colkeys):
+                        raise ValueError("Clipboard columns outside protocol editor")
+                if len(row) != width:
+                    raise ValueError("Clipboard rows have unequal column counts")
+                if count_rows * width + len(row) > MAX_CLIP:
+                    raise ValueError("Bulk paste over 150,000-cell safety limit")
+                target_row = top + count_rows
+                if target_row >= provider.row_count(search):
+                    raise ValueError("Clipboard extends beyond visible signals")
+                identity = provider.signal_id(iid,
+                    provider.index_for_view(iid, target_row, search, desc, sort_key))
+                for column, value in enumerate(row):
+                    batch.append((identity, colkeys[left + column], value))
+                count_rows += 1
+            if not batch:
+                return 0
+            return provider.edit(iid, batch)
+
         def done(n):
-            model.info.emit(f"Pasted {n:,} cells — session-only draft")
+            model.info.emit(f"Pasted {n:,} cells in one worker transaction — session-only")
+            # Keep keyboard focus at the same visible cell when view is unchanged.
+            def restore(count):
+                try:
+                    model.row_count_changed.disconnect(restore)
+                except (RuntimeError, TypeError):
+                    pass
+                if model.instance_id == iid and model.search == search and (
+                        model.descending == desc and model.sort_key == sort_key):
+                    if top < count:
+                        self.setCurrentIndex(model.index(top, left))
+            model.row_count_changed.connect(restore)
             model.reload()
         model.workers.submit(work, done, write=True, error=self.failure.emit)
 

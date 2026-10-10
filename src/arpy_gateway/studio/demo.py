@@ -48,8 +48,10 @@ IEC104 = SHARED + (
     Field("quality_policy", "Quality", "choice", 140, ("propagate", "invalid_on_loss")),
 )
 MAX_DEMO_ROWS = 500_000
-MAX_BATCH_CELLS = 50_000
+MAX_BATCH_CELLS = 150_000
 MAX_HISTORY = 16
+MAX_HISTORY_CELLS = 200_000
+MAX_CHANGED_CELLS = 300_000
 
 
 class MappingRow(NamedTuple):
@@ -275,7 +277,7 @@ class DemoProvider:
     def edit(self, instance_id: str, changes: list[tuple[str, str, Any]]) -> int:
         """Atomic, identity-based batch edit. (signal_id, field_key, new_value)."""
         if not changes or len(changes) > MAX_BATCH_CELLS:
-            raise ValueError("Bulk edit exceeds limit (50,000 cells)")
+            raise ValueError("Bulk edit exceeds limit (150,000 cells)")
         with self._lock:
             inst = self.instance(instance_id)
             fields = {c.key: c for c in self.fields(instance_id)}
@@ -293,6 +295,14 @@ class DemoProvider:
                 old = self._get(inst, key[1], key[2])
                 if old != new:
                     history.append((key, old, new))
+            # Bound memory *before* mutating any cell: no partial oversized paste.
+            count_after = len(self._overrides)
+            for key, old, new in history:
+                has_override = key in self._overrides
+                will_override = new != self._default(inst, key[1], key[2])
+                count_after += int(will_override) - int(has_override)
+            if count_after > MAX_CHANGED_CELLS:
+                raise ValueError("Offline preview change memory budget reached; use Store #3")
             for key, old, new in history:
                 if new == self._default(inst, key[1], key[2]):
                     self._overrides.pop(key, None)
@@ -300,7 +310,9 @@ class DemoProvider:
                     self._overrides[key] = new
             if history:
                 self._history.append(history)
-                self._history = self._history[-MAX_HISTORY:]
+                while (len(self._history) > MAX_HISTORY or
+                       sum(len(entry) for entry in self._history) > MAX_HISTORY_CELLS):
+                    self._history.pop(0)
                 self._redo.clear()
             return len(history)
 
