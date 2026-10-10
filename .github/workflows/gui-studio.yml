@@ -49,11 +49,11 @@ jobs:
           from PySide6.QtCore import QTimer
           from PySide6.QtWidgets import QApplication
           from arpy_gateway.studio.demo import DemoProvider
-          from arpy_gateway.studio.window import StudioWindow
+          from arpy_gateway.studio.v2_window import StudioV2Window
           app = QApplication([])
           provider = DemoProvider()
           provider.resize_demo(500_000)
-          gui = StudioWindow(provider)
+          gui = StudioV2Window(provider)
           gui.show()
           gui.navigation.setCurrentRow(2)
           def shot():

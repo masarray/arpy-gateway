@@ -15,14 +15,14 @@ def main(argv=None):
 
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
-    from .window import StudioWindow
+    from .v2_window import StudioV2Window
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("ARPY Gateway Studio")
     app.setOrganizationName("ARPY")
     demo = DemoProvider()
     demo.resize_demo(opts.demo_rows)
-    win = StudioWindow(demo)
+    win = StudioV2Window(demo)
     win.show()
     if opts.screenshot:
         def capture():

@@ -146,6 +146,8 @@ class EngineeringView:
                         return
                     if key not in values:
                         raise ValueError("Unrecognized connection parameter")
+                    if key == "enabled":
+                        value = str(value).strip().lower() in ("1", "yes", "on", "true")
                     if key in ("port", "unit_id", "poll_ms"):
                         value = int(value)
                         if not 0 <= value <= 65535:
