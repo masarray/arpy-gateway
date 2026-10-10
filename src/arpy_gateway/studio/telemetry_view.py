@@ -22,11 +22,13 @@ class TelemetrySource:
     def fields(self, instance_id):
         if self.demo.instance(instance_id).protocol == "iec104":
             base = (Field("name", "Signal", width=215),
+                    Field("owner", "ASDU Station", width=160),
                     Field("common_address", "CA", width=75),
                     Field("ioa", "IOA", width=95),
                     Field("ti", "TI", width=65))
         else:
             base = (Field("name", "Signal", width=215),
+                    Field("owner", "IED / Device", width=160),
                     Field("register_table", "Register FC", width=110),
                     Field("native_address", "PDU Address", width=115))
         if self.simulation:
@@ -51,7 +53,7 @@ class TelemetrySource:
 
     def page(self, instance_id, offset, limit, search="", descending=False, sort_key="name"):
         records = self.signals.page(instance_id, offset, limit, search, descending, sort_key)
-        originals = tuple(field.key for field in self.demo.fields(instance_id))
+        originals = tuple(field.key for field in self.signals.fields(instance_id))
         fields = self.fields(instance_id)
         columns = tuple(f.key for f in fields)
         out = []

@@ -77,7 +77,10 @@ class VirtualSignals(QAbstractTableModel):
     def flags(self, index):
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
-        return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
+        base = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        if self.fields[index.column()].kind == "readonly":
+            return base
+        return base | Qt.ItemFlag.ItemIsEditable
 
     def _request(self, page):
         if page in self._cached or page in self._loading or len(self._loading) >= 4:

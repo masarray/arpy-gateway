@@ -12,7 +12,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from arpy_gateway.domain.models import InstanceRole
-from .demo import DemoProvider
+from .demo import DemoProvider, Field
 
 MAX_ASSIGN = 2000
 ADDRESS_MOD = 30_000
@@ -304,12 +304,28 @@ class ScopedSource:
         return self.demo.count
 
     def fields(self, instance_id):
-        return self.demo.fields(instance_id)
+        columns = self.demo.fields(instance_id)
+        # Ownership is an ID-backed read-only projection until STORE #3 supports
+        # transactional cross-device rebinding and undo/redo.
+        return (columns[0], Field("owner", "IED / ASDU Station", "readonly", 172),
+                *columns[1:])
+
+    def owner_name(self, index):
+        identity = self.project.owner_for(self.instance_id, index)
+        for point in self.project.points(self.instance_id):
+            if point.id == identity:
+                return point.name
+        for station in self.project.stations(self.instance_id):
+            if station.id == identity:
+                return station.name
+        return "Unassigned" if identity == "" else identity
 
     def signal_id(self, instance_id, index):
         return self.demo.signal_id(instance_id, index)
 
     def edit(self, instance_id, changes):
+        if any(field == "owner" for _, field, _ in changes):
+            raise PermissionError("Connection reassignment requires STORE #3 transactional binding")
         return self.demo.edit(instance_id, changes)
 
     def history(self, redo):
@@ -374,4 +390,8 @@ class ScopedSource:
             return []
         # Construct only viewport records; never materialize all 500k signal rows.
         # In the production Store adapter this becomes a paged indexed SQL query.
-        return [self.demo.page(instance_id, index, 1)[0] for index in indexes]
+        out = []
+        for index in indexes:
+            entry = self.demo.page(instance_id, index, 1)[0]
+            out.append((entry[0], entry[1], entry[2], self.owner_name(index), *entry[3:]))
+        return out
