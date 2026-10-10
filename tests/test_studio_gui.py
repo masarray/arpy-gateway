@@ -79,6 +79,19 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(d.page("scada104", 0, 1)[0][
             [f.key for f in d.fields("scada104")].index("ioa") + 2], 201)
 
+    def test_protocol_boundaries_and_bad_bulk_values_do_not_partial_commit(self):
+        d = DemoProvider()
+        one = d.signal_id("meter01", 0)
+        two = d.signal_id("meter01", 1)
+        before = d.page("meter01", 0, 1)[0]
+        for key, invalid in (("native_address", 65536), ("unit_id", 256),
+                             ("register_count", 0)):
+            with self.assertRaises(ValueError):
+                d.edit("meter01", [(one, "name", "NEW"), (two, key, invalid)])
+        self.assertEqual(d.page("meter01", 0, 1)[0], before)
+        with self.assertRaises(ValueError):
+            d.edit("scada104", [(d.signal_id("scada104", 0), "common_address", 65535)])
+
     def test_multi_destination_id_based_mapping(self):
         d = DemoProvider()
         self.assertEqual(d.map_range("meter01", "scada104", 0, 10), 10)
@@ -122,6 +135,45 @@ class QtStudioTests(unittest.TestCase):
         self.assertFalse(self.win.simulation.findChildren(type(self.win.simulation.preview_status)) == [])
         self.win.simulation.preview_value()
         self.assertIn("delivered: NO", self.win.simulation.preview_status.text())
+
+    def test_fill_right_and_down_are_atomic_and_reversible(self):
+        self.win.navigation.setCurrentRow(2)
+        m = self.win.signals.model
+        grid = self.win.signals.grid
+        until(lambda: 0 in m._cached)
+        names = [x.key for x in m.fields]
+        byte_col, word_col = names.index("byte_order"), names.index("word_order")
+        one = self.demo.signal_id("meter01", 0)
+        self.demo.edit("meter01", [(one, "byte_order", "little")])
+        m.reload()
+        until(lambda: 0 in m._cached)
+        area = QItemSelection(m.index(0, byte_col), m.index(0, word_col))
+        grid.selectionModel().select(area, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+        grid.fill_right()
+        until(lambda: self.demo.page("meter01", 0, 1)[0][word_col+2] == "little")
+        grid.undo()
+        until(lambda: self.demo.page("meter01", 0, 1)[0][word_col+2] == "big")
+
+        address_col = names.index("native_address")
+        self.demo.edit("meter01", [(one, "native_address", 444)])
+        m.reload()
+        until(lambda: 0 in m._cached)
+        area = QItemSelection(m.index(0, address_col), m.index(1, address_col))
+        grid.selectionModel().select(area, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+        grid.fill_down()
+        until(lambda: self.demo.page("meter01", 1, 1)[0][address_col+2] == 444)
+        grid.undo()
+        until(lambda: self.demo.page("meter01", 1, 1)[0][address_col+2] == 2)
+
+    def test_monitoring_runtime_provider_never_fabricates_good_data(self):
+        view = self.win.runtime_view
+        self.assertFalse(view.connected)
+        self.assertFalse(view.simulation_available)
+        for state in view.instances():
+            self.assertEqual(state.last_value, "—")
+            self.assertEqual(state.quality, "Unavailable")
+        self.win.monitor.copy_diagnostics()
+        self.assertIn("Runtime connected: NO", QApplication.clipboard().text())
 
     def test_window_virtual_page_cache_and_stale_generation(self):
         self.win.signals.sizes.setCurrentIndex(2)
