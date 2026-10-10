@@ -1,34 +1,61 @@
-# Issue #4 — ARPY Studio GUI engineering preview
+# ARPY Gateway Studio v2 — GUI issue #4 implementation and verification
 
-Status: **OFFLINE, session-only GUI. No protocol stack, deployed configuration, IPC runtime or physical value simulation yet.** Based on normative main architecture v1, not PR #1's old flat signal-table domain.
+**Status:** operational PySide6 offline *engineering preview*, not production gateway. Architecture v1 on main is unchanged. RFC [#13](https://github.com/masarray/arpy-gateway/issues/13) proposes canonical CommunicationPoint/DataStation identity and persistence; production database [#3](https://github.com/masarray/arpy-gateway/issues/3), IPC [#8](https://github.com/masarray/arpy-gateway/issues/8) and Simulation [#9](https://github.com/masarray/arpy-gateway/issues/9) are separate workstreams.
 
-## Start
-- Windows/macOS/Linux, Python 3.10+: `pip install -e ".[studio]"` then `arpy-studio`.
-- `arpy-studio --demo-rows 100000` or `--demo-rows 500000` generates *virtual* rows in offline demo provider.
-- CI builds an unsigned portable Windows .exe artifact. Unpack and open; **never interpret it as a functioning gateway**.
+## Run
+- Python 3.10+ with PySide6: `python -m pip install -e ".[studio]"`, then `arpy-studio --demo-rows 1000`.
+- Compare virtual size: `arpy-studio --demo-rows 100000` / `--demo-rows 500000`.
+- CI creates unsigned standalone Windows preview EXE and 1000/500000 signal Qt screenshots. Do **not** interpret successful build as live IEC-104/Modbus operation.
 
-## Six independent workspaces
-1. **Gateway Config** — add a Modbus TCP/RTU or IEC-104 instance; choose role Client/Master or Server/Slave; enable in offline project draft.
-2. **Protocol Config** — per endpoint IP, port, serial parameters, Unit ID and CA; edit field + leave focus to apply to current **session only**.
-3. **Protocol Signals** — choose endpoint and edit protocol-specific fields. Modbus shows PDU 0-based address, Unit ID, register table, byte/word order, scale. IEC-104 shows CA, IOA, TI (including TI 35 measurement vs TI 45 command), transfer and quality policies. Virtualized 256-row pages, max 24 cached pages. Stable IDs independent of sorting.
-4. **Protocol Mapping** — two different protocol instances and source index/count; Preview then Auto-assign generates telemetry mapping edges to existing destination signal IDs, without writing protocol address fields.
-5. **Protocol Monitoring** — connection status explicitly **Not connected**, data/quality **Unavailable**. Copy Diagnostics copies offline status.
-6. **Value Simulation** — local value preview only. Runtime Start disabled; data **never forwarded**. Actual simulation belongs to Runtime issue #9 after IPC issue #8.
+## GUI anatomy
 
-## Spreadsheet keys
-`Ctrl+C` rectangular TSV to Excel; `Ctrl+V` rectangular TSV from Excel; `Ctrl+D` fill down; `Ctrl+R` fill right; `Ctrl+Z` undo; `Ctrl+Y` redo; type to edit; header sorting; search exact sequence number, e.g. `#12345`. Select integer address column and press **Auto-number selected**. Max 150,000 cells per clipboard/fill action and 150,000 edits per writer transaction. Clipboard TSV parsing is streamed in the writer worker (not the Qt main thread). WorkerHub has 2 read workers and 1 ordered writer, max 24 outstanding jobs.
+1. **Left workspace navigator**: six separate task workspaces + Back navigation + Light/Dark theme toggle.
+2. **Protocol Explorer**: common stable-ID hierarchy re-projected for each workspace; only enabled instances by default; toggle Show disabled. It never renders 500k signal nodes.
+3. **Right primary workspace**: dedicated configuration editor, protocol-native signal spreadsheet, mapping grid, or monitoring/simulation catalog.
 
-## Known limits
-- Demo provider is replaceable and deliberately does not create SQLite tables (owned by STORE issue #3). Edits, endpoint settings and mapping edges disappear on Studio exit. Records generated lazily, not a 500k-row materialization.
-- Demo searching is exact sequence or general voltage/analog/all; arbitrary substring and edited-value-aware sort/filter require indexed STORE implementation. Address sorting uses generated numeric PDU order with Unit ID tie-break; edited addresses do not reorder in preview.
-- Undo history is bounded at 16 batches **and 200,000 cell changes combined**, with at most 300,000 changed demo cells in memory; all **session-only**, not durable. Visual FPS requires real Windows test; offscreen tests are not display-speed measurements.
-- Mapping preview does not edit IOA or register addresses; those belong in Protocol Signals. Runtime mapping compilation and full address collision checks are not yet connected.
-- No protocol sockets and no fabricated live values. Actual command simulation deliberately unavailable.
+### Gateway Config
 
-## Ownership
-All issue #4 code stays in `src/arpy_gateway/studio/` with Qt tests, workflow, optional Qt packaging bootstrap and this non-normative guide. No edits to `domain/`, `contracts/`, `runtime/`, `adapters/` or `ipc/`. Replace DemoProvider with async engineering repository from issue #3 and authenticated runtime IPC from issue #8.
+Create / enable / disable protocol role instances (Modbus TCP/RTU Client or Server, IEC104 Client or Server) in **offline draft**. Does not start any protocol session. Disabling instance does not delete its signal definitions.
 
-## Test
-`QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -p 'test_studio_gui.py' -v`
+### Protocol Config (separate peer vs station)
 
-CI runs pure contracts and GUI smoke/unit, captures Linux screenshot, and builds an unsigned Windows portable EXE. PR remains **draft** until validation and user workflow testing.
+Modbus TCP Master -> General Settings (timeouts, retries, scan defaults) and IED Connections table (Meter01/Meter02 with IP, port, UnitID); Modbus RTU Master -> global COM/baud/parity and station peers by UnitID. IEC104 Slave -> General Settings (bind/listen and T1/T2/T3), local ASDU Station Common Address, and **distinct Master Connections list** (authorized remote SCADA IP). Multiple masters can access the same CA signal catalog. Selecting connection shows its inline-editable point parameters. Avoid treating IP of master peer as CA ownership.
+
+### Protocol Signals
+
+Explorer -> Modbus Master -> Meter02 selects only Meter02 signal IDs (original 1000-row dataset: #501–#1000). Explorer -> IEC104 Server -> CA1 selects local station signal IDs. The grid includes a read-only **IED / ASDU Station ownership** column plus protocol-native fields, including Modbus register table, raw types, byte/word swapping and IEC104 IOA/TI. Device/station identity is stable and view order never acts as primary key.
+
+Add Signal creates a new stable-ID local draft signal under current connection/station. IEC104 destination **Assign from Catalog** chooses source instance, IED, signal ordinal range, TI (monitoring-only), IOA start and count; preview/confirmation precedes one worker operation. It creates new IEC104 destination signals and explicit mapping edges, not an index-to-index link. Duplicate IOA collision for already mapped destination signals is rejected. Draft is session-only and cannot deploy.
+
+Spreadsheet shortcuts: Ctrl+C/V TSV, Ctrl+D/R, Ctrl+Z/Y; Find exact signal index `#1234`, sort, Auto-number selected. 256 rows per fetch, 24 bounded LRU pages, 2 reader threads/1 serialized writer and generation invalidation. TSV import/edit size caps and history caps are explicit. Synthetic edit/undo is not a substitute for durable Store #3.
+
+### Protocol Mapping
+
+Independent mapping record list. Double-click Source or Destination signal ID -> Protocol Signals, correct protocol owner, filter down to selected signal ID. Back restores prior mapping workspace. One source -> multiple destinations is allowed; fan-in arbitrated/rejected. No physical control runs from clicking mapping.
+
+### Protocol Monitoring
+
+Protocol Explorer filters the full virtual signal catalog by IED / ASDU station. The right table shows protocol columns plus read-only Value, Quality, Timestamp, COT and RX/TX. **Offline mode intentionally displays — / Unavailable**, never a fabricated quality Good or current timestamp. Copy Diagnostics provides redacted offline explanation. Actual per-instance telemetered values and COT need IPC and protocol adapter runtime.
+
+### Value Simulation
+
+Same explorer and full signal catalog as Protocol Monitoring. Previewing selected signal value is local and labelled **NOT transmitted**. The Real↔Simulated actual source switch is disabled until independent Runtime + authorization + TTL/origin implementation exists. Real-source network connection must not be silently disconnected by toggle; physical control is blocked.
+
+## Global design tokens
+
+`studio/design_tokens.py` is the only owner of semantic light/dark palette, typography, density scale, row height, sidebar/explorer widths and QSS. Semantic colors for success/warning/error/focus, neutral surfaces and high-density tables are centralized. No heavy QSS on 500k individual cells, no large decorative cards, and no per-cell QWidget.
+
+## Deliberate boundaries / unfinished integration
+
+- **No persistent project database**: new peers/stations/signals/assignments are session-only mock records, not revisioned engineering snapshots. Full indexed arbitrary substring search, durable changes, transaction rollback and ownership reassignment remain owned by Store #3 / RFC #13.
+- **No live runtime**: IEC104 values/COT, connection diagnostics, genuine spontaneous messages and simulation-to-SCADA need adapter/IPC integration. Do not interpret a GUI preview as transmitted process data.
+- No user-configurable new protocol adapter field schema yet (ARCH #11/#13); mock fields are derived from known Modbus/IEC104 semantics for GUI demonstration.
+- Real Windows GUI latency, 100k/500k FPS and worst-case memory need human-in-the-loop benchmarks; offscreen CI demonstrates functional Qt rendering/worker operations but is **not** a performance SLA.
+- Disabling one protocol hides it from explorers but its draft records remain intact. Deleting/moving dependencies requires future impact-aware Store transactions.
+- Mapping bulk demo has an explicit maximum (2,000 newly assigned destinations per operation). Production mapping assignment needs store-backed batched commits, collision validation across all server namespaces, and durable undo/redo.
+
+## Validation
+Run `QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v`.
+GitHub Actions Linux checks v1 contract, v1 grid regression and v2 explorer/mapping/monitor tests; build Windows preview EXE on success. Protocol hardware acceptance is **out of scope**.
+
+Do not merge draft PR #12 until user validates Windows GUI and Store #3 integration with official canonical schema. The corrected workflow specification is in [STUDIO_WORKFLOW_V2_PROPOSAL.md](STUDIO_WORKFLOW_V2_PROPOSAL.md).
