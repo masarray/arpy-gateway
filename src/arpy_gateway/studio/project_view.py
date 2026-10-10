@@ -87,7 +87,7 @@ class EngineeringView:
         }
         self._seeded: dict[str, tuple[str, ...]] = {
             "meter01": ("meter01:ied:1", "meter01:ied:2"),
-            "scada104": ("scada104:ca:1",),
+            "scada104": (),  # starts with empty IEC104 destination signal catalog
             "mirror": ("mirror:unit:1",),
         }
         self._extra_owners: dict[tuple[str, int], str] = {}
@@ -333,6 +333,10 @@ class ScopedSource:
 
     def _range(self):
         if not self.scope_id:
+            # IEC104 server destination is built by assignment or explicit Add,
+            # not pre-filled with 500k fake accessible IOAs.
+            if self.demo.instance(self.instance_id).protocol == "iec104":
+                return (0, 0)
             return 0, self.demo.count
         return self.project._seed_range(self.instance_id, self.scope_id)
 

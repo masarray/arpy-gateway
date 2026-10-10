@@ -174,6 +174,7 @@ class StudioV2UiTests(unittest.TestCase):
         self.win.navigation.setCurrentRow(5)
         idx = self.win.tree_model.find("scada104:ca:1")
         self.win.tree.setCurrentIndex(idx)
-        await_ui(lambda: self.win.simulation.model.rowCount() == 1000)
+        await_ui(lambda: self.win.simulation.model.rowCount() == 0)
         self.assertFalse(self.win.simulation.toggle.isEnabled())
-        self.assertIn("NO", self.win.simulation.provider.page("scada104", 0, 1)[0][-1])
+        # Destination catalog is empty until signals are assigned from source.
+        self.assertEqual(self.win.simulation.provider.page("scada104", 0, 1), [])
