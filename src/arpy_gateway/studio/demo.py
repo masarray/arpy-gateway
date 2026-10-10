@@ -251,8 +251,12 @@ class DemoProvider:
             if str(raw).strip() == "":
                 raise ValueError(f"{col.title}: blank is not a valid integer")
             value = int(raw)
-            if value < 0 or value > 16_777_215:
-                raise ValueError(f"{col.title}: numeric value out of range")
+            bounds = {"native_address": (0, 65535), "unit_id": (0, 255),
+                      "common_address": (1, 65534), "ioa": (0, 16777215),
+                      "register_count": (1, 125)}
+            minimum, maximum = bounds.get(col.key, (0, 16777215))
+            if not minimum <= value <= maximum:
+                raise ValueError(f"{col.title}: valid range {minimum}–{maximum}")
             return value
         if col.kind == "float":
             value = float(raw)
