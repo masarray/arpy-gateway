@@ -1,0 +1,5 @@
+"""PyInstaller-compatible absolute-import entrypoint."""
+from arpy_gateway.studio.app import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
