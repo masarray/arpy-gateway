@@ -116,6 +116,27 @@ class ContractsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             decode_project(fixture)
 
+    def test_iec104_address_collision_is_scoped_to_server_and_common_address(self):
+        p = sample_project()
+        collision = replace(p.signals[1], id="another", name="Another IEC104 point")
+        self.assertIn("ADDRESS_COLLISION", codes(replace(p, signals=p.signals + (collision,))))
+        another_ca = replace(collision, parameters={"common_address": 2, "ioa": 1001, "ti": 13})
+        self.assertNotIn("ADDRESS_COLLISION", codes(replace(p, signals=p.signals + (another_ca,))))
+
+    def test_modbus_server_register_overlap_and_client_aliasing(self):
+        p = sample_project()
+        server = replace(p.instances[0], role=type(p.instances[0].role).SERVER)
+        original = replace(p.signals[0], direction=SignalDirection.OUTBOUND)
+        overlap = replace(original, id="other", name="overlap",
+                          parameters={"register_table": "holding", "native_address": 1, "register_count": 2})
+        project = replace(p, instances=(server, p.instances[1]),
+                          signals=(original, overlap, p.signals[1]))
+        self.assertIn("ADDRESS_COLLISION", codes(project))
+        original_client = replace(p.signals[0], direction=SignalDirection.INBOUND)
+        alias_client = replace(original_client, id="alias", name="Alias")
+        self.assertNotIn("ADDRESS_COLLISION", codes(replace(
+            p, signals=(original_client, alias_client, p.signals[1]))))
+
     def test_contract_json_files_parse(self):
         for filename in ["project.v1.schema.json", "ipc.v1.schema.json"]:
             obj = json.loads((ROOT / "contracts" / filename).read_text())
