@@ -39,13 +39,14 @@ class WorkerHub(QObject):
         self._write.setMaxThreadCount(1)
         self._ids = 0
         self._active = {}  # identity -> (Job, callback, error callback)
+        self._closing = False
 
     @property
     def outstanding(self):
         return len(self._active)
 
     def submit(self, work, callback, write=False, error=None):
-        if len(self._active) >= self.MAX_OUTSTANDING:
+        if self._closing or len(self._active) >= self.MAX_OUTSTANDING:
             self.error.emit("Worker queue full; wait for pending operations")
             return False
         self._ids += 1
@@ -59,12 +60,14 @@ class WorkerHub(QObject):
     @Slot(int, object)
     def _on_success(self, identity, result):
         state = self._active.pop(identity, None)
-        if state and state[1]:
+        if state and state[1] and not self._closing:
             state[1](result)
 
     @Slot(int, str)
     def _on_error(self, identity, message):
         state = self._active.pop(identity, None)
+        if self._closing:
+            return
         if state and state[2]:
             state[2](message)
         else:
@@ -73,7 +76,8 @@ class WorkerHub(QObject):
     def shutdown(self):
         # Threads never own GUI or domain runtime. Completed callbacks can
         # still be safely discarded when QObject disappears on app teardown.
+        self._closing = True
         self._read.clear()
         self._write.clear()
-        self._read.waitForDone(5000)
-        self._write.waitForDone(5000)
+        # Never synchronously wait on running jobs from Qt GUI thread.
+        # QThreadPool lifecycle drains remaining bounded running jobs on teardown.

@@ -205,6 +205,7 @@ class SignalGrid(QTableView):
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setAlternatingRowColors(True)
         self.setSortingEnabled(True)
+        self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
         self.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked |
                              QAbstractItemView.EditTrigger.EditKeyPressed |
                              QAbstractItemView.EditTrigger.AnyKeyPressed)
@@ -253,11 +254,11 @@ class SignalGrid(QTableView):
             for offset in range(top, bottom + 1, PAGE):
                 chunks.extend(model.demo.page(iid, offset,
                               min(PAGE, bottom + 1 - offset), search, desc, key))
-            io = io_buffer = __import__("io").StringIO()
-            writer = csv.writer(io_buffer, delimiter="\t", lineterminator="\n")
+            output = io.StringIO()
+            writer = csv.writer(output, delimiter="\t", lineterminator="\n")
             for entry in chunks:
                 writer.writerow(entry[left + 2:right + 3])
-            return io.getvalue()
+            return output.getvalue()
         def done(text):
             if generation == model.generation:
                 QApplication.clipboard().setText(text)

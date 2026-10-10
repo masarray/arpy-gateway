@@ -217,6 +217,8 @@ class ProtocolSignalsPage(QWidget):
         self.sizes = QComboBox()
         for size in (1_000, 100_000, 500_000):
             self.sizes.addItem(f"{size:,} demo rows", size)
+        initial_size = self.sizes.findData(self.demo.count)
+        self.sizes.setCurrentIndex(max(0, initial_size))
         self.sizes.currentIndexChanged.connect(self.size_changed)
         bar.addWidget(self.sizes)
         page.addLayout(bar)
