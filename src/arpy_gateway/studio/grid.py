@@ -137,10 +137,10 @@ class VirtualSignals(QAbstractTableModel):
         record = self._cached_row(index.row())
         if record is None:
             return False
-        self.submit([(record[0], self.fields[index.column()].key, value)])
+        self.request_edit([(record[0], self.fields[index.column()].key, value)])
         return True
 
-    def submit(self, changes):
+    def request_edit(self, changes):
         if not changes:
             return
         iid = self.instance_id  # capture immutable identity BEFORE view changes
