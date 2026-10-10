@@ -91,6 +91,25 @@ class DemoProvider:
         with self._lock:
             return next(i for i in self._instances if i.id == instance_id)
 
+    def add_instance(self, name: str, protocol: str, role: InstanceRole) -> str:
+        """Create session-only endpoint; no deployment side effects."""
+        from uuid import uuid4
+        if not name.strip() or protocol not in ("modbus_tcp", "modbus_rtu", "iec104"):
+            raise ValueError("Protocol and endpoint name required")
+        if protocol == "modbus_rtu":
+            settings = {"port": "COM1", "baudrate": 9600, "parity": "N", "unit_id": 1}
+        elif protocol == "iec104":
+            settings = {"bind" if role is InstanceRole.SERVER else "host": "127.0.0.1",
+                        "port": 2404, "common_address": 1}
+        else:
+            settings = {"bind" if role is InstanceRole.SERVER else "host": "127.0.0.1",
+                        "port": 1502 if role is InstanceRole.SERVER else 502, "unit_id": 1}
+        instance_id = "instance-" + uuid4().hex[:12]
+        with self._lock:
+            self._instances += (ProtocolInstance(instance_id, name.strip(), protocol,
+                                                  role, False, settings),)
+        return instance_id
+
     def set_enabled(self, instance_id: str, enabled: bool) -> None:
         with self._lock:
             self._instances = tuple(replace(i, enabled=enabled) if i.id == instance_id else i
@@ -102,11 +121,11 @@ class DemoProvider:
             if key not in existing.settings:
                 raise ValueError("Unknown parameter")
             updated = dict(existing.settings)
-            if key in ("port", "unit_id", "poll_ms", "common_address"):
+            if key in ("port", "unit_id", "poll_ms", "common_address", "baudrate"):
                 value = int(value)
                 if not (0 <= value <= 65535):
                     raise ValueError("Numeric parameter outside configured bounds")
-                if key == "port" and value == 0:
+                if key in ("port", "baudrate") and value == 0:
                     raise ValueError("Port 0 is not permitted")
             updated[key] = value
             self._instances = tuple(replace(i, settings=updated) if i.id == instance_id else i
@@ -317,6 +336,16 @@ class DemoProvider:
                 raise ValueError("Demo mapping limit reached")
             self._mappings.extend(pending)
             return len(pending)
+
+    def mappings_count(self) -> int:
+        with self._lock:
+            return len(self._mappings)
+
+    def mapping_page(self, offset: int, limit: int) -> tuple[MappingRow, ...]:
+        if offset < 0 or limit < 1 or limit > 256:
+            raise ValueError("Mapping page outside bounded range")
+        with self._lock:
+            return tuple(self._mappings[offset:offset+limit])
 
     def mappings(self) -> tuple[MappingRow, ...]:
         with self._lock:
