@@ -32,3 +32,20 @@ Separate lanes may coordinate via contract interfaces defined below, not import 
 
 ## Parallel handoff checklist
 Read `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/CONTRACTS.md`, `docs/WORKSPACES.md`, your issue. Review `main` HEAD and contracts version. Work only in your lane, implement fake fixtures/tests before hardware wiring, and submit PR with exact acceptance evidence. Escalate cross-boundary changes through ARCH issue, don't silently edit other lanes.
+
+
+## Open parallel work tickets (GitHub)
+
+| Issue | Lane | Scope |
+| --- | --- | --- |
+| [#3](https://github.com/masarray/arpy-gateway/issues/3) | STORE | Normalized engineering DB + migration/revisions |
+| [#4](https://github.com/masarray/arpy-gateway/issues/4) | GUI | Six-workspace shell and fast protocol-specific tables |
+| [#5](https://github.com/masarray/arpy-gateway/issues/5) | MAPPING | Typed mapping compiler, transforms, large graph |
+| [#6](https://github.com/masarray/arpy-gateway/issues/6) | MODBUS | TCP/RTU client+server adapters |
+| [#7](https://github.com/masarray/arpy-gateway/issues/7) | IEC104 | Client/server, GI, spontaneous, quality/commands |
+| [#8](https://github.com/masarray/arpy-gateway/issues/8) | IPC | Authenticated runtime service / revisions / telemetry |
+| [#9](https://github.com/masarray/arpy-gateway/issues/9) | SIM | Runtime-side simulation with isolation |
+| [#10](https://github.com/masarray/arpy-gateway/issues/10) | QA | 100k/500k, fault injection and interop |
+| [#11](https://github.com/masarray/arpy-gateway/issues/11) | ARCH | Strict codec, adapter field schemas, contract evolution |
+
+Launch separate development threads using a specific issue and the instructions in `AGENTS.md`. Each PR follows its own lane and must target the contract baseline on `main`. Do not run unmerged PR #1 code as the definitive Gateway architecture.
