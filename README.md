@@ -24,7 +24,7 @@
 - [Performance and anti-naive coding rules](docs/PERFORMANCE.md) — bounded workers/cache, O(N+E) graph, acceptance benchmarks.
 - [Parallel delivery/ownership](docs/DELIVERY.md) and [roadmap](docs/ROADMAP.md).
 - [Architecture Decision Records](docs/ADR) and [v1 JSON schemas](contracts).
-- [Draft foundation PR #2](https://github.com/masarray/arpy-gateway/pull/2) with pure Python domain skeleton and contract tests.
+- [Merged foundation PR #2](https://github.com/masarray/arpy-gateway/pull/2) with pure Python domain skeleton and contract tests.
 
 ## Contract test (no Qt required)
 
@@ -36,6 +36,6 @@ Run on Python 3.10+; CI also validates JSON Schema and a demo project at `exampl
 
 ## Scope and ownership
 
-Only structural code and tests are implemented on the architecture branch. **No Modbus client/server, IEC-104 networking, GUI six-workspace shell, transport server, or field-data simulation is functional yet.** All implementations must be developed in issue-linked isolated PRs after the contract baseline reaches `main`. The [workstream issues](https://github.com/masarray/arpy-gateway/issues) enumerate dependencies and non-overlapping code areas.
+Only structural code and tests are implemented in the architecture foundation on `main`. **No Modbus client/server, IEC-104 networking, GUI six-workspace shell, transport server, or field-data simulation is functional yet.** All implementations must be developed in issue-linked isolated PRs after the contract baseline reaches `main`. The [workstream issues](https://github.com/masarray/arpy-gateway/issues) enumerate dependencies and non-overlapping code areas.
 
 Qt is not a runtime dependency. Python domain contracts cannot import Qt/protocol libraries. Any control capability requires explicit safety review and field-interoperability tests.
