@@ -185,8 +185,33 @@ class DemoProvider:
             index = self._index_for_query(search)
             return self._rows if index is None else int(0 <= index < self._rows)
 
+    def index_for_view(self, instance_id: str, row: int, search: str = "",
+                       descending: bool = False, sort_key: str = "name") -> int:
+        """O(1) identity lookup for monotonic demo indexes; no 500k sort array."""
+        fixed = self._index_for_query(search)
+        if fixed is not None:
+            if row != 0 or not (0 <= fixed < self._rows):
+                raise IndexError(row)
+            return fixed
+        if not 0 <= row < self._rows:
+            raise IndexError(row)
+        ordinal = self._rows - row - 1 if descending else row
+        if sort_key == "native_address" and self.instance(instance_id).protocol != "iec104":
+            full, tail = divmod(self._rows, 30_000)
+            if not full:
+                return ordinal
+            split = (full + 1) * tail
+            if ordinal < split:
+                addr_index, unit_index = divmod(ordinal, full + 1)
+            else:
+                addr_offset, unit_index = divmod(ordinal - split, full)
+                addr_index = tail + addr_offset
+            return 30_000 * unit_index + addr_index
+        return ordinal
+
     def page(self, instance_id: str, offset: int, limit: int,
-             search: str = "", descending: bool = False) -> list[tuple[Any, ...]]:
+             search: str = "", descending: bool = False,
+             sort_key: str = "name") -> list[tuple[Any, ...]]:
         if limit < 1 or limit > 256 or offset < 0:
             raise ValueError("Page outside bounded size")
         with self._lock:
@@ -196,7 +221,7 @@ class DemoProvider:
             total = self._rows if fixed is None else int(0 <= fixed < self._rows)
             out = []
             for visible_index in range(offset, min(offset + limit, total)):
-                index = (self._rows - 1 - visible_index if descending else visible_index) if fixed is None else fixed
+                index = self.index_for_view(instance_id, visible_index, search, descending, sort_key)
                 out.append((self.signal_id(instance_id, index), index,
                             *(self._get(inst, index, col.key) for col in fields)))
             return out
