@@ -68,6 +68,7 @@ class DemoProvider:
     def __init__(self):
         self._lock = RLock()
         self._rows = 1_000
+        self._added: dict[str, int] = {}
         self._overrides: dict[tuple[str, int, str], Any] = {}
         self._history: list[list[tuple[tuple[str, int, str], Any, Any]]] = []
         self._redo: list[list[tuple[tuple[str, int, str], Any, Any]]] = []
@@ -141,10 +142,26 @@ class DemoProvider:
             raise ValueError("Unsupported demo size")
         with self._lock:
             self._rows = rows
+            self._added.clear()
             self._overrides.clear()
             self._history.clear()
             self._redo.clear()
             self._mappings.clear()
+
+    def instance_count(self, instance_id: str) -> int:
+        with self._lock:
+            self.instance(instance_id)
+            return self._rows + self._added.get(instance_id, 0)
+
+    def append_signal(self, instance_id: str, name: str) -> tuple[str, int]:
+        if not name.strip():
+            raise ValueError("Signal name is required")
+        with self._lock:
+            self.instance(instance_id)
+            index = self._rows + self._added.get(instance_id, 0)
+            self._added[instance_id] = self._added.get(instance_id, 0) + 1
+            self._overrides[(instance_id, index, "name")] = name.strip()
+            return self.signal_id(instance_id, index), index
 
     @staticmethod
     def signal_id(instance_id: str, index: int) -> str:
@@ -201,24 +218,26 @@ class DemoProvider:
             return int(match.group(1)) - 1
         return -1
 
-    def row_count(self, search: str = "") -> int:
+    def row_count(self, search: str = "", instance_id: str = "") -> int:
         with self._lock:
+            total = self.instance_count(instance_id) if instance_id else self._rows
             index = self._index_for_query(search)
-            return self._rows if index is None else int(0 <= index < self._rows)
+            return total if index is None else int(0 <= index < total)
 
     def index_for_view(self, instance_id: str, row: int, search: str = "",
                        descending: bool = False, sort_key: str = "name") -> int:
         """O(1) identity lookup for monotonic demo indexes; no 500k sort array."""
         fixed = self._index_for_query(search)
+        total = self.instance_count(instance_id)
         if fixed is not None:
-            if row != 0 or not (0 <= fixed < self._rows):
+            if row != 0 or not (0 <= fixed < total):
                 raise IndexError(row)
             return fixed
-        if not 0 <= row < self._rows:
+        if not 0 <= row < total:
             raise IndexError(row)
-        ordinal = self._rows - row - 1 if descending else row
+        ordinal = total - row - 1 if descending else row
         if sort_key == "native_address" and self.instance(instance_id).protocol != "iec104":
-            full, tail = divmod(self._rows, 30_000)
+            full, tail = divmod(total, 30_000)
             if not full:
                 return ordinal
             split = (full + 1) * tail
@@ -239,7 +258,8 @@ class DemoProvider:
             inst = self.instance(instance_id)
             fields = self.fields(instance_id)
             fixed = self._index_for_query(search)
-            total = self._rows if fixed is None else int(0 <= fixed < self._rows)
+            instance_total = self.instance_count(instance_id)
+            total = instance_total if fixed is None else int(0 <= fixed < instance_total)
             out = []
             for visible_index in range(offset, min(offset + limit, total)):
                 index = self.index_for_view(instance_id, visible_index, search, descending, sort_key)
@@ -287,7 +307,7 @@ class DemoProvider:
                 if field not in fields or not sid.startswith(prefix):
                     raise ValueError("Invalid protocol field or signal identity")
                 index = int(sid[len(prefix):]) - 1
-                if index < 0 or index >= self._rows or self.signal_id(instance_id, index) != sid:
+                if index < 0 or index >= self.instance_count(instance_id) or self.signal_id(instance_id, index) != sid:
                     raise ValueError("Signal identity outside project")
                 updates[(instance_id, index, field)] = self._cast(fields[field], raw)
             history = []
@@ -350,6 +370,34 @@ class DemoProvider:
                                               source, sid, destination, did))
             if len(self._mappings) + len(pending) > 50_000:
                 raise ValueError("Demo mapping limit reached")
+            self._mappings.extend(pending)
+            return len(pending)
+
+    def bind_explicit(self, source: str, target: str,
+                      pairs: list[tuple[int, int]]) -> int:
+        """Mock-only explicit pair assignment, never match by visible row index."""
+        if source == target or not 1 <= len(pairs) <= 10_000:
+            raise ValueError("Invalid route or bulk size")
+        with self._lock:
+            self.instance(source)
+            self.instance(target)
+            used_source_target = {(m.source_signal_id, m.destination_signal_id)
+                                  for m in self._mappings}
+            used_dest = {m.destination_signal_id for m in self._mappings}
+            pending = []
+            for a, b in pairs:
+                if not (0 <= a < self.instance_count(source) and
+                        0 <= b < self.instance_count(target)):
+                    raise ValueError("Mapping signal ID outside catalog")
+                sid, did = self.signal_id(source, a), self.signal_id(target, b)
+                if (sid, did) in used_source_target or did in used_dest:
+                    raise ValueError("Duplicate destination or edge requires arbitration")
+                pending.append(MappingRow(f"mapping:{source}:{target}:{a}:{b}",
+                                          source, sid, target, did))
+                used_dest.add(did)
+                used_source_target.add((sid, did))
+            if len(self._mappings) + len(pending) > 50_000:
+                raise ValueError("Mapping preview limit reached")
             self._mappings.extend(pending)
             return len(pending)
 
