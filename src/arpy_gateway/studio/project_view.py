@@ -91,6 +91,8 @@ class EngineeringView:
             "mirror": ("mirror:unit:1",),
         }
         self._extra_owners: dict[tuple[str, int], str] = {}
+        self._point_by_id = {p.id: p for peers in self._peers.values() for p in peers}
+        self._station_by_id = {x.id: x for stations in self._stations.values() for x in stations}
 
     def instances(self, include_disabled: bool = False):
         items = self.demo.instances()
@@ -117,6 +119,7 @@ class EngineeringView:
                                    role, tuple(settings))
         with self._lock:
             self._peers.setdefault(instance_id, []).append(point)
+            self._point_by_id[point.id] = point
         return point
 
     def add_station(self, instance_id: str, ca: int) -> DataStation:
@@ -131,6 +134,7 @@ class EngineeringView:
             item = DataStation("station:" + uuid4().hex[:16], instance_id,
                                f"ASDU Station CA {ca}", ca)
             self._stations.setdefault(instance_id, []).append(item)
+            self._station_by_id[item.id] = item
             return item
 
     def update_point(self, instance_id: str, point_id: str, key: str, value: Any) -> None:
@@ -143,6 +147,7 @@ class EngineeringView:
                         if not str(value).strip():
                             raise ValueError("Connection name required")
                         points[n] = replace(point, name=str(value).strip())
+                        self._point_by_id[point_id] = points[n]
                         return
                     if key not in values:
                         raise ValueError("Unrecognized connection parameter")
@@ -156,6 +161,7 @@ class EngineeringView:
                         raise ValueError("Network peer address cannot be empty")
                     values[key] = value
                     points[n] = replace(point, settings=tuple(values.items()))
+                    self._point_by_id[point_id] = points[n]
                     return
             raise KeyError("Connection ID not found")
 
@@ -313,12 +319,13 @@ class ScopedSource:
 
     def owner_name(self, index):
         identity = self.project.owner_for(self.instance_id, index)
-        for point in self.project.points(self.instance_id):
-            if point.id == identity:
-                return point.name
-        for station in self.project.stations(self.instance_id):
-            if station.id == identity:
-                return station.name
+        with self.project._lock:
+            point = self.project._point_by_id.get(identity)
+            station = self.project._station_by_id.get(identity)
+        if point is not None:
+            return point.name
+        if station is not None:
+            return station.name
         return "Unassigned" if identity == "" else identity
 
     def signal_id(self, instance_id, index):
