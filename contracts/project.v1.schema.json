@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/masarray/arpy-gateway/blob/main/contracts/project.v1.schema.json",
+  "title": "ARPY engineering snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "instances",
+    "signals",
+    "mappings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instances": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/instance"
+      }
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/signal"
+      }
+    },
+    "mappings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/mapping"
+      }
+    }
+  },
+  "$defs": {
+    "instance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "protocol",
+        "role",
+        "enabled",
+        "settings"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "settings": {
+          "type": "object"
+        }
+      }
+    },
+    "signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "instance_id",
+        "name",
+        "family",
+        "value_type",
+        "direction",
+        "enabled",
+        "unit",
+        "parameters"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "family": {
+          "enum": [
+            "binary",
+            "analog",
+            "counter",
+            "command"
+          ]
+        },
+        "value_type": {
+          "enum": [
+            "bool",
+            "int16",
+            "uint16",
+            "int32",
+            "uint32",
+            "int64",
+            "uint64",
+            "float32",
+            "float64",
+            "string",
+            "bytes"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "inbound",
+            "outbound",
+            "bidirectional"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      }
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_signal_id",
+        "destination_signal_id",
+        "kind",
+        "enabled",
+        "transform",
+        "fan_in_policy",
+        "request_control"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_signal_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destination_signal_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "telemetry",
+            "command"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "transform": {
+          "type": "object"
+        },
+        "fan_in_policy": {
+          "enum": [
+            "reject",
+            "latest",
+            "priority"
+          ]
+        },
+        "request_control": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

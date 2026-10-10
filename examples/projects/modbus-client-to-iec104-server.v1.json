@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "project_id": "project-demo-01",
+  "instances": [
+    {
+      "id": "meter-01",
+      "name": "Power Meter 01",
+      "protocol": "modbus_tcp",
+      "role": "client",
+      "enabled": true,
+      "settings": {
+        "host": "192.168.1.10",
+        "port": 502,
+        "unit_id": 1,
+        "poll_interval_ms": 1000
+      }
+    },
+    {
+      "id": "scada-01",
+      "name": "IEC-104 SCADA",
+      "protocol": "iec104",
+      "role": "server",
+      "enabled": true,
+      "settings": {
+        "bind": "127.0.0.1",
+        "port": 2404,
+        "common_address": 1
+      }
+    }
+  ],
+  "signals": [
+    {
+      "id": "meter-voltage",
+      "instance_id": "meter-01",
+      "name": "Voltage L1",
+      "family": "analog",
+      "value_type": "float32",
+      "direction": "inbound",
+      "enabled": true,
+      "unit": "V",
+      "parameters": {
+        "register_table": "holding",
+        "native_address": 0,
+        "register_count": 2,
+        "word_order": "big",
+        "byte_order": "big"
+      }
+    },
+    {
+      "id": "scada-voltage",
+      "instance_id": "scada-01",
+      "name": "Voltage L1 IEC104",
+      "family": "analog",
+      "value_type": "float32",
+      "direction": "outbound",
+      "enabled": true,
+      "unit": "V",
+      "parameters": {
+        "common_address": 1,
+        "ioa": 1001,
+        "ti": 13
+      }
+    }
+  ],
+  "mappings": [
+    {
+      "id": "voltage-route",
+      "source_signal_id": "meter-voltage",
+      "destination_signal_id": "scada-voltage",
+      "kind": "telemetry",
+      "enabled": true,
+      "transform": {},
+      "fan_in_policy": "reject",
+      "request_control": false
+    }
+  ]
+}
