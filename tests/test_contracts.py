@@ -137,6 +137,27 @@ class ContractsTest(unittest.TestCase):
         self.assertNotIn("ADDRESS_COLLISION", codes(replace(
             p, signals=(original_client, alias_client, p.signals[1]))))
 
+    def test_decoder_rejects_unknown_signal_fields(self):
+        raw = json.loads(FIXTURE.read_text())
+        raw["signals"][0]["phantom_protocol_address"] = 999
+        with self.assertRaises(ValueError):
+            decode_project(raw)
+
+    def test_same_instance_edges_disabled_without_capability(self):
+        p = sample_project()
+        dst = replace(p.signals[0], id="same-instance-out",
+                      direction=SignalDirection.OUTBOUND, name="same-instance sink")
+        edge = replace(p.mappings[0], destination_signal_id=dst.id)
+        self.assertIn("SAME_INSTANCE", codes(replace(
+            p, signals=p.signals + (dst,), mappings=(edge,))))
+
+    def test_non_json_metadata_is_rejected(self):
+        p = sample_project()
+        with self.assertRaises(ValueError):
+            replace(p.signals[0], parameters={"native_address": float("nan")})
+        with self.assertRaises(TypeError):
+            replace(p.signals[0], parameters={"byte_seq": b"\x01\x02"})
+
     def test_contract_json_files_parse(self):
         for filename in ["project.v1.schema.json", "ipc.v1.schema.json"]:
             obj = json.loads((ROOT / "contracts" / filename).read_text())
