@@ -217,8 +217,6 @@ class SignalGrid(QTableView):
         self.horizontalHeader().setStretchLastSection(True)
         self.setWordWrap(False)
         self.setShowGrid(False)
-        self.setStyleSheet("QTableView { selection-background-color: #dbeafe;"
-                           "selection-color: #173458; }")
         for action, sequence in (
             (self.copy_cells, "Ctrl+C"), (self.paste_cells, "Ctrl+V"),
             (self.fill_down, "Ctrl+D"), (self.fill_right, "Ctrl+R"),

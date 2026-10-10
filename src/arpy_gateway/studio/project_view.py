@@ -139,6 +139,11 @@ class EngineeringView:
             for n, point in enumerate(points):
                 if point.id == point_id:
                     values = point.params()
+                    if key == "name":
+                        if not str(value).strip():
+                            raise ValueError("Connection name required")
+                        points[n] = replace(point, name=str(value).strip())
+                        return
                     if key not in values:
                         raise ValueError("Unrecognized connection parameter")
                     if key in ("port", "unit_id", "poll_ms"):
