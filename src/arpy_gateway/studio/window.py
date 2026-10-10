@@ -17,6 +17,7 @@ from arpy_gateway.domain.models import InstanceRole
 from .demo import DemoProvider
 from .grid import PAGE, SignalGrid, VirtualSignals
 from .workers import WorkerHub
+from .runtime_view import DisconnectedRuntime
 
 
 def heading(text: str, subtitle: str = ""):
@@ -443,9 +444,9 @@ class MappingPage(QWidget):
 
 
 class MonitoringPage(QWidget):
-    def __init__(self, demo, notify, parent=None):
+    def __init__(self, demo, runtime_view, notify, parent=None):
         super().__init__(parent)
-        self.demo, self.notify = demo, notify
+        self.demo, self.runtime, self.notify = demo, runtime_view, notify
         page = QVBoxLayout(self)
         page.setContentsMargins(18, 14, 18, 12)
         page.addWidget(heading("Protocol Monitoring",
@@ -470,13 +471,19 @@ class MonitoringPage(QWidget):
         self.refresh()
 
     def refresh(self):
-        self.table.setRowCount(len(self.demo.instances()))
-        for row, inst in enumerate(self.demo.instances()):
-            values = [inst.name, "Not connected", "—", "Unavailable", "— / —", "—"]
+        instance_names = {inst.id: inst.name for inst in self.demo.instances()}
+        items = self.runtime.instances()
+        self.table.setRowCount(len(items))
+        self.status.setText("Gateway Runtime connected" if self.runtime.connected else
+                            "No Gateway Runtime IPC connected — ALL data unavailable")
+        for row, item in enumerate(items):
+            values = [instance_names.get(item.instance_id, item.instance_id),
+                      item.connection_text, item.last_value, item.quality,
+                      item.rx_tx, item.timestamp]
             for col, value in enumerate(values):
                 self.table.setItem(row, col, QTableWidgetItem(value))
     def copy_diagnostics(self):
-        QApplication.clipboard().setText(self.demo.diagnostics())
+        QApplication.clipboard().setText(self.runtime.diagnostics())
         self.notify("Copied OFFLINE diagnostic summary; no live packet data")
 
 
@@ -529,6 +536,7 @@ class StudioWindow(QMainWindow):
     def __init__(self, demo=None, parent=None):
         super().__init__(parent)
         self.demo = demo or DemoProvider()
+        self.runtime_view = DisconnectedRuntime(self.demo)
         self.hub = WorkerHub(self)
         self.setWindowTitle("ARPY Gateway Studio — Offline Engineering Preview")
         self.resize(1330, 810)
@@ -560,7 +568,7 @@ class StudioWindow(QMainWindow):
         self.config = ProtocolConfigPage(self.demo, self.hub, self.show_message)
         self.signals = ProtocolSignalsPage(self.demo, self.hub, self.show_message)
         self.mapping = MappingPage(self.demo, self.hub, self.show_message)
-        self.monitor = MonitoringPage(self.demo, self.show_message)
+        self.monitor = MonitoringPage(self.demo, self.runtime_view, self.show_message)
         self.simulation = SimulationPage(self.demo, self.show_message)
         for page in (self.gateway, self.config, self.signals, self.mapping,
                      self.monitor, self.simulation):
