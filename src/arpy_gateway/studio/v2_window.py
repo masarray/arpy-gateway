@@ -703,13 +703,20 @@ class StudioV2Window(QMainWindow):
             self.tree.currentIndex().internalPointer().key if self.tree.currentIndex().isValid()
             else "")
         self.tree_model.rebuild(workspace, self.disabled_toggle.isChecked())
-        self.tree.expandAll()  # only protocol/peer/station nodes; no signal nodes
+        # Expand only protocol roots: large connection lists remain collapsed and
+        # are never instantiated as per-signal widgets or eagerly expanded.
+        for row in range(self.tree_model.rowCount()):
+            self.tree.expand(self.tree_model.index(row, 0))
         index = self.tree_model.find(previous) if previous else QModelIndex()
         if not index.isValid() and self.context.instance_id:
             index = self.tree_model.first_for(self.context.instance_id)
         if not index.isValid() and self.tree_model.rowCount() > 0:
             index = self.tree_model.index(0, 0)
         if index.isValid():
+            ancestor = index.parent()
+            while ancestor.isValid():
+                self.tree.expand(ancestor)
+                ancestor = ancestor.parent()
             self.tree.setCurrentIndex(index)
             self._set_node(index.internalPointer())
 
