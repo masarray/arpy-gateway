@@ -397,5 +397,12 @@ class ScopedSource:
         out = []
         for index in indexes:
             entry = self.demo.page(instance_id, index, 1)[0]
-            out.append((entry[0], entry[1], entry[2], self.owner_name(index), *entry[3:]))
+            display_name = entry[2]
+            # In generated dataset labels, use the actual connection owner, not
+            # the parent ProtocolInstance technical ID (meter01 is *not* an IED).
+            if (self.demo.instance(instance_id).protocol.startswith("modbus") and
+                    (instance_id, index, "name") not in self.demo._overrides):
+                display_name = self.owner_name(index).upper().replace(" ", "") + (
+                    " / Voltage " + str(index+1).zfill(6))
+            out.append((entry[0], entry[1], display_name, self.owner_name(index), *entry[3:]))
         return out

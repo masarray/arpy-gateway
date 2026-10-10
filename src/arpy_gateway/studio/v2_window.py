@@ -430,6 +430,7 @@ class SignalWorkspace(QWidget):
             self.project.demo.instance(iid).protocol == "iec104" and
             self.project.demo.instance(iid).role.value == "server")
         self.assign_button.setEnabled(can_assign)
+        self.assign_button.setVisible(can_assign)  # no irrelevant actions on Modbus editors
 
     def search_changed(self):
         self.model.reload(search=self.search.text().strip())
@@ -725,6 +726,10 @@ class StudioV2Window(QMainWindow):
             self._set_node(current.internalPointer())
 
     def _set_node(self, node):
+        if node.kind in ("peers", "stations"):
+            index = self.tree_model.find(node.key)
+            if index.isValid():
+                self.tree.expand(index)  # reveal IED/station children only on selection
         self.context.instance_id = node.instance_id
         self.context.scope_id = node.scope_id
         self.context.node_type = node.kind

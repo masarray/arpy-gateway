@@ -121,6 +121,8 @@ def stylesheet(t: ThemeTokens) -> str:
       border-color: {primary};
     }}
     QPushButton#Primary:hover {{ background: {primary_hover}; }}
+    QPushButton#Primary:disabled {{ color: {muted}; background: {surface_alt};
+                                  border-color: {border}; }}
     QStatusBar {{ background: {surface_alt}; color: {muted}; }}
     QSplitter::handle {{ background: {border}; }}
     QToolTip {{ background: {surface}; color: {text}; border: 1px solid {border}; }}
