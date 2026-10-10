@@ -166,6 +166,10 @@ class DemoProvider:
             self._overrides[(instance_id, index, "name")] = name.strip()
             return self.signal_id(instance_id, index), index
 
+    def has_field_override(self, instance_id: str, index: int, field: str) -> bool:
+        with self._lock:
+            return (instance_id, index, field) in self._overrides
+
     @staticmethod
     def signal_id(instance_id: str, index: int) -> str:
         return f"{instance_id}:signal:{index + 1:07d}"

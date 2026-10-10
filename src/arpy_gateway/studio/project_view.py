@@ -168,12 +168,13 @@ class EngineeringView:
         return ((n * ordinal) // len(ids), (n * (ordinal+1)) // len(ids))
 
     def owner_for(self, instance_id: str, index: int) -> str:
-        if index >= self.demo.count:
-            return self._extra_owners.get((instance_id, index), "")
-        seeded = self._seeded.get(instance_id, ())
-        if not seeded:
-            return ""
-        return seeded[min(len(seeded)-1, index * len(seeded) // self.demo.count)]
+        with self._lock:
+            if index >= self.demo.count:
+                return self._extra_owners.get((instance_id, index), "")
+            seeded = self._seeded.get(instance_id, ())
+            if not seeded:
+                return ""
+            return seeded[min(len(seeded)-1, index * len(seeded) // self.demo.count)]
 
     def owner_for_signal_id(self, instance_id: str, signal_id: str) -> str:
         prefix = f"{instance_id}:signal:"
@@ -343,9 +344,10 @@ class ScopedSource:
     def _extra(self):
         start = self.demo.count
         count = self.demo.instance_count(self.instance_id)
-        return tuple(i for i in range(start, count)
-                     if not self.scope_id or
-                     self.project._extra_owners.get((self.instance_id, i)) == self.scope_id)
+        with self.project._lock:
+            return tuple(i for i in range(start, count)
+                         if not self.scope_id or
+                         self.project._extra_owners.get((self.instance_id, i)) == self.scope_id)
 
     def _search_index(self, search):
         return self.demo._index_for_query(search)
@@ -401,7 +403,7 @@ class ScopedSource:
             # In generated dataset labels, use the actual connection owner, not
             # the parent ProtocolInstance technical ID (meter01 is *not* an IED).
             if (self.demo.instance(instance_id).protocol.startswith("modbus") and
-                    (instance_id, index, "name") not in self.demo._overrides):
+                    not self.demo.has_field_override(instance_id, index, "name")):
                 display_name = self.owner_name(index).upper().replace(" ", "") + (
                     " / Voltage " + str(index+1).zfill(6))
             out.append((entry[0], entry[1], display_name, self.owner_name(index), *entry[3:]))
