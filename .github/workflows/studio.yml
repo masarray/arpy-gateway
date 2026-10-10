@@ -1,0 +1,51 @@
+name: Studio - Test and Windows EXE
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Tests and 100K benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install application
+        run: python -m pip install -e .
+      - name: Run unit and GUI smoke tests (offscreen)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+      - name: Benchmark 100,000 signals
+        run: python -m arpy_gateway.benchmark --rows 100000
+
+  windows-exe:
+    name: Build portable Windows GUI EXE
+    needs: quality
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install application and PyInstaller
+        run: python -m pip install -e . pyinstaller
+      - name: Build one-file Windows desktop application
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name ARPY-Gateway-Studio launcher.py
+      - name: Upload testable GUI executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARPY-Gateway-Studio-Windows-Portable
+          path: dist/ARPY-Gateway-Studio.exe
+          if-no-files-found: error
+          retention-days: 14
