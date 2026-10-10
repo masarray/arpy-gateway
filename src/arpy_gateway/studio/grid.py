@@ -84,10 +84,11 @@ class VirtualSignals(QAbstractTableModel):
             return
         epoch, iid, search, descending, sort_key = (
             self.generation, self.instance_id, self.search, self.descending, self.sort_key)
+        provider = self.demo  # immutable query provider bound before background request
         self._loading.add(page)
 
         def work():
-            return self.demo.page(iid, page * PAGE, PAGE, search, descending, sort_key)
+            return provider.page(iid, page * PAGE, PAGE, search, descending, sort_key)
 
         def done(rows):
             if epoch != self.generation:
@@ -144,10 +145,11 @@ class VirtualSignals(QAbstractTableModel):
         if not changes:
             return
         iid = self.instance_id  # capture immutable identity BEFORE view changes
+        provider = self.demo
         def done(count):
             self.info.emit(f"Updated {count:,} cells — session-only draft")
             self.reload()
-        self.workers.submit(lambda: self.demo.edit(iid, changes), done,
+        self.workers.submit(lambda: provider.edit(iid, changes), done,
                             write=True, error=self.failure.emit)
 
     def reload(self, *, instance_id=None, search=None, descending=None, sort_key=None):
@@ -176,7 +178,8 @@ class VirtualSignals(QAbstractTableModel):
             self.row_count_changed.emit(total)
             if total:
                 self._request(0)
-        self.workers.submit(lambda: self.demo.row_count(query), done,
+        provider = self.demo
+        self.workers.submit(lambda: provider.row_count(query), done,
                             error=self.failure.emit)
 
     def sort(self, column, order=Qt.SortOrder.AscendingOrder):
@@ -249,10 +252,11 @@ class SignalGrid(QTableView):
         model = self.model()
         iid, search, desc, key = model.instance_id, model.search, model.descending, model.sort_key
         generation = model.generation
+        provider = model.demo
         def work():
             chunks = []
             for offset in range(top, bottom + 1, PAGE):
-                chunks.extend(model.demo.page(iid, offset,
+                chunks.extend(provider.page(iid, offset,
                               min(PAGE, bottom + 1 - offset), search, desc, key))
             output = io.StringIO()
             writer = csv.writer(output, delimiter="\t", lineterminator="\n")
@@ -344,20 +348,21 @@ class SignalGrid(QTableView):
         model = self.model()
         iid, search, desc, key = model.instance_id, model.search, model.descending, model.sort_key
         cols = tuple(c.key for c in model.fields)
+        provider = model.demo
         def work():
             batch = []
-            anchor = model.demo.page(iid, top, 1, search, desc, key)[0]
+            anchor = provider.page(iid, top, 1, search, desc, key)[0]
             if down:
                 for row in range(top + 1, bottom + 1):
-                    sid = model.demo.signal_id(iid, model.demo.index_for_view(iid, row, search, desc, key))
+                    sid = provider.signal_id(iid, provider.index_for_view(iid, row, search, desc, key))
                     for col in range(left, right+1):
                         batch.append((sid, cols[col], anchor[col+2]))
             else:
                 for row in range(top, bottom+1):
-                    first = model.demo.page(iid, row, 1, search, desc, key)[0]
+                    first = provider.page(iid, row, 1, search, desc, key)[0]
                     for col in range(left+1, right+1):
                         batch.append((first[0], cols[col], first[left+2]))
-            return model.demo.edit(iid, batch) if batch else 0
+            return provider.edit(iid, batch) if batch else 0
         def done(n):
             model.info.emit(f"Filled {n:,} cells")
             model.reload()
@@ -392,13 +397,14 @@ class SignalGrid(QTableView):
         model = self.model()
         iid, search, desc, key = model.instance_id, model.search, model.descending, model.sort_key
         field = model.fields[left].key
+        provider = model.demo
         def work():
-            first = model.demo.page(iid, top, 1, search, desc, key)[0]
+            first = provider.page(iid, top, 1, search, desc, key)[0]
             start = int(first[left+2])
-            batch = [(model.demo.signal_id(iid,
-                      model.demo.index_for_view(iid, row, search, desc, key)),
+            batch = [(provider.signal_id(iid,
+                      provider.index_for_view(iid, row, search, desc, key)),
                       field, start+row-top) for row in range(top, bottom+1)]
-            return model.demo.edit(iid, batch)
+            return provider.edit(iid, batch)
         def done(n):
             model.info.emit(f"Auto-numbered {n:,} addresses")
             model.reload()
