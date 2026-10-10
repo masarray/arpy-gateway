@@ -44,6 +44,20 @@ def decode_project(raw: Dict[str, Any]) -> ProjectSnapshot:
         raise ValueError("Unsupported engineering project schema version")
     if set(raw) != {"schema_version", "project_id", "instances", "signals", "mappings"}:
         raise ValueError("Unknown/missing top-level fields in project")
+    required = {
+        "instances": {"id", "name", "protocol", "role", "enabled", "settings"},
+        "signals": {"id", "instance_id", "name", "family", "value_type",
+                    "direction", "enabled", "unit", "parameters"},
+        "mappings": {"id", "source_signal_id", "destination_signal_id",
+                     "kind", "enabled", "transform", "fan_in_policy", "request_control"},
+    }
+    for section, keys in required.items():
+        collection = raw[section]
+        if type(collection) is not list:
+            raise ValueError(section + " must be an array")
+        for index, item in enumerate(collection):
+            if type(item) is not dict or set(item) != keys:
+                raise ValueError("Unexpected fields in %s[%d]" % (section, index))
     return ProjectSnapshot(
         project_id=raw["project_id"],
         schema_version=1,

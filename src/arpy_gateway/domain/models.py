@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import math
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Tuple, Union
 
@@ -67,10 +68,14 @@ class SignalOrigin(str, Enum):
 def deep_freeze(value: Any) -> Any:
     """Defensively copy JSON-like settings; avoid mutation through a frozen DTO."""
     if isinstance(value, Mapping):
-        return MappingProxyType({str(k): deep_freeze(v) for k, v in value.items()})
+        if any(type(k) is not str for k in value):
+            raise TypeError("Protocol metadata keys must be strings")
+        return MappingProxyType({k: deep_freeze(v) for k, v in value.items()})
     if isinstance(value, (list, tuple)):
         return tuple(deep_freeze(v) for v in value)
-    if value is None or type(value) in (str, bool, int, float, bytes):
+    if type(value) is float and not math.isfinite(value):
+        raise ValueError("Non-finite values cannot enter JSON contracts")
+    if value is None or type(value) in (str, bool, int, float):
         return value
     raise TypeError("Protocol metadata must contain JSON-like primitives")
 

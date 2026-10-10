@@ -95,6 +95,9 @@ def validate_project(project: ProjectSnapshot) -> Tuple[ValidationIssue, ...]:
         route_ids.add(route)
         if src.id == dst.id:
             err("SELF_MAPPING", "mapping", edge.id, "Signal cannot map to itself")
+        if src.instance_id == dst.instance_id:
+            err("SAME_INSTANCE", "mapping", edge.id,
+                "Same-instance routing requires future explicit adapter loopback capability")
         if src.direction not in (SignalDirection.INBOUND, SignalDirection.BIDIRECTIONAL):
             err("SOURCE_DIRECTION", "mapping", edge.id, "Source point must be readable/inbound")
         if dst.direction not in (SignalDirection.OUTBOUND, SignalDirection.BIDIRECTIONAL):
