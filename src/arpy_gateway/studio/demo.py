@@ -74,11 +74,12 @@ class DemoProvider:
         self._redo: list[list[tuple[tuple[str, int, str], Any, Any]]] = []
         self._mappings: list[MappingRow] = []
         self._instances = (
-            ProtocolInstance("meter01", "Meter 01 — Client", "modbus_tcp", InstanceRole.CLIENT,
-                             True, {"host": "192.168.1.10", "port": 502, "unit_id": 1, "poll_ms": 1000}),
-            ProtocolInstance("scada104", "SCADA — IEC-104 Server", "iec104", InstanceRole.SERVER,
-                             True, {"bind": "127.0.0.1", "port": 2404, "common_address": 1}),
-            ProtocolInstance("mirror", "Mirror — Modbus Server", "modbus_tcp", InstanceRole.SERVER,
+            ProtocolInstance("meter01", "Modbus TCP Master", "modbus_tcp", InstanceRole.CLIENT,
+                             True, {"timeout_ms": 1000, "retries": 3, "scan_default_ms": 1000}),
+            ProtocolInstance("scada104", "IEC-104 Slave / Server", "iec104", InstanceRole.SERVER,
+                             True, {"bind": "127.0.0.1", "port": 2404,
+                                    "t1_seconds": 15, "t2_seconds": 10, "t3_seconds": 20}),
+            ProtocolInstance("mirror", "Modbus TCP Server", "modbus_tcp", InstanceRole.SERVER,
                              False, {"bind": "127.0.0.1", "port": 1502, "unit_id": 1}),
         )
 
@@ -124,7 +125,9 @@ class DemoProvider:
             if key not in existing.settings:
                 raise ValueError("Unknown parameter")
             updated = dict(existing.settings)
-            if key in ("port", "unit_id", "poll_ms", "common_address", "baudrate"):
+            if key in ("port", "unit_id", "poll_ms", "common_address", "baudrate",
+                        "timeout_ms", "retries", "scan_default_ms",
+                        "t1_seconds", "t2_seconds", "t3_seconds"):
                 value = int(value)
                 if not (0 <= value <= 65535):
                     raise ValueError("Numeric parameter outside configured bounds")
