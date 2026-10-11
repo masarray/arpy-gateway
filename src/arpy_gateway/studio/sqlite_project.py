@@ -1,6 +1,6 @@
 """Single-source SQLite v2 engineering read/write facade for Studio.
 
-All methods are worker-only. No Qt, transport, gateway runtime, or DEMO
+All methods are worker-only. No transport, gateway runtime, or DEMO
 dependencies. Existing user's engineering.sqlite3 is opened in place: the
 authoritative stable IDs are never copied, renamed or seeded from GUI demo.
 

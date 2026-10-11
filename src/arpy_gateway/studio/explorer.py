@@ -73,7 +73,7 @@ class ProtocolExplorer(QAbstractItemModel):
             elif workspace in (2, 4, 5):  # Signal editor, Monitoring, Simulation
                 root.add("all:"+inst.id, "All Signals", "all")
                 for point in self.project.points(inst.id):
-                    if point.kind != "allowed_master":
+                    if point.kind not in ("allowed_master", "authorized_master"):
                         root.add(point.id, point.name, "scope", point.id)
                 for station in self.project.stations(inst.id):
                     root.add(station.id, station.name, "scope", station.id)

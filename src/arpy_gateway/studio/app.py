@@ -24,8 +24,11 @@ def main(argv=None):
     app = QApplication(sys.argv[:1])
     app.setApplicationName("ARPY Gateway Studio")
     app.setOrganizationName("ARPY")
-    demo = DemoProvider()
-    demo.resize_demo(opts.demo_rows)
+    # No mock provider is allocated in the installed engineering mode.
+    demo = None
+    if opts.demo:
+        demo = DemoProvider()
+        demo.resize_demo(opts.demo_rows)
     # Developer/CI fixture only: production runtime endpoints must be
     # provisioned securely by the installer + OS IPC service, never through
     # a GUI port/password form, command-line token or a runtime pip install.
