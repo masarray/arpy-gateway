@@ -134,8 +134,15 @@ class EngineeringStore:
         self._writer.execute("PRAGMA foreign_keys=ON")
         self._writer.execute("PRAGMA busy_timeout=5000")
         self._writer.execute("PRAGMA journal_mode=WAL")
-        self._writer.execute("PRAGMA synchronous=FULL")
-        self._initialize()
+        try:
+            self._writer.execute("PRAGMA synchronous=FULL")
+            self._initialize()
+        except BaseException:
+            # Windows keeps an open SQLite handle locked on constructor failure.
+            # Unsupported schema/failed migration must never leak the file.
+            self._writer.close()
+            self._closed = True
+            raise
 
     def _initialize(self):
         version = self._writer.execute("PRAGMA user_version").fetchone()[0]
