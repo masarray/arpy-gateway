@@ -111,6 +111,7 @@ class SQLiteStudioWindow(QMainWindow):
         self.mapping_cursor=""
         self.signal_more=False
         self.mapping_more=False
+        self._first_open=True
         self._build(runtime_endpoint)
         self.setWindowTitle("ARPY Gateway Studio · SQLite Engineering Draft")
         self.resize(1450,850)
@@ -321,12 +322,15 @@ class SQLiteStudioWindow(QMainWindow):
             f"Saved data stations: {len(topology.station_rows)}\n"
             "Active runtime revision: NOT DEPLOYED")
         self._rebuild_tree()
-        if not self.instance_id:
+        if self._first_open:
+            self._first_open=False
             inst=next((i for i in topology.instance_rows
                        if i.protocol=="modbus_tcp" and i.role.value=="client"),None)
-            if inst:
+            if inst and self.navigation.currentRow()==1:
                 idx=self.tree_model.find("peers:"+inst.id)
-                if idx.isValid():self.tree.setCurrentIndex(idx)
+                if idx.isValid():
+                    self.tree.expand(idx)  # reveal saved IED rows on reopen
+                    self.tree.setCurrentIndex(idx)
         self.statusBar().showMessage(
             f"Loaded engineering database generation {topology.generation} · NOT DEPLOYED",0)
         self._show_page()
