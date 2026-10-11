@@ -188,6 +188,48 @@ class RealModbusIPCIntegration(unittest.IsolatedAsyncioTestCase):
             await server.stop()
             await runtime.stop()
 
+    async def test_two_real_modbus_instance_pollers_share_one_fleet_view(self):
+        from arpy_gateway.runtime.service.fleet import RuntimeFleet
+        instances = []
+        for iid in ("meter_a", "meter_b"):
+            inst = ProtocolInstance(iid, iid, "modbus_tcp",
+                                    InstanceRole.CLIENT, True, {})
+            device = DeviceConfig(iid + ":ied", iid, "Meter", 1,
+                                  "127.0.0.1", self.slave.port, 60, 180)
+            signal = ProtocolSignal(iid + ":voltage", iid, "Voltage",
+                                    SignalFamily.ANALOG, ValueType.FLOAT32,
+                                    SignalDirection.INBOUND, True, "V",
+                                    {"device_id": device.id, "register_table": "holding",
+                                     "native_address": 10})
+            instances.append(build_modbus_runtime(inst, (device,), (signal,)))
+        fleet = RuntimeFleet(instances)
+        server = LocalReadOnlyServer(fleet, token=TOKEN)
+        await fleet.start()
+        port = await server.start()
+        try:
+            await self._wait_for(lambda: fleet.health()["frames_generated"] >= 2)
+            baseline = await request(port, TOKEN, "signals.page",
+                                     {"offset": 0, "limit": 2})
+            self.assertEqual(baseline["total"], 2)
+            self.assertEqual([r["value"] for r in baseline["items"]],
+                             [123.0, 123.0])
+            self.slave.float_value = 87.75
+            await self._wait_for(
+                lambda: fleet.page(offset=0, limit=2)["items"][0]["value"] == 87.75
+                and fleet.page(offset=0, limit=2)["items"][1]["value"] == 87.75)
+            delta = await request(port, TOKEN, "signals.delta", {
+                "generation": baseline["generation"], "cursor": baseline["cursor"],
+                "offset": 0, "limit": 2})
+            self.assertEqual([r["value"] for r in delta["items"]], [87.75, 87.75])
+            states = await request(port, TOKEN, "devices.page",
+                                   {"offset": 0, "limit": 2})
+            self.assertEqual([r["instance_id"] for r in states["items"]],
+                             ["meter_a", "meter_b"])
+            self.assertTrue(all(r["state"] == "online" for r in states["items"]))
+        finally:
+            await server.stop()
+            await fleet.stop()
+
     async def test_daemon_process_survives_independent_monitor_clients(self):
         """Real loopback Modbus slave and daemon must be distinct OS processes."""
         env = os.environ.copy()
