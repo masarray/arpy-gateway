@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from .configuration import DeviceConfig, validate_serial
 from .planner import ReadRequest
 
+# Import once: this code runs for every Modbus request. The adapter remains
+# importable without optional transport when inspecting contracts offline.
+try:
+    from pymodbus.exceptions import ModbusIOException as _NoResponseType
+except ImportError:
+    _NoResponseType = ()
+
 
 class ModbusReadError(Exception):
     """Validated Modbus exception/response error (not a valid measurement)."""
@@ -70,14 +77,12 @@ class PymodbusClient:
         except Exception as exc:
             # PyModbus raises ModbusIOException for a missing response (not a
             # device ExceptionResponse). Other transport faults need reconnect.
-            from pymodbus.exceptions import ModbusIOException
-            if isinstance(exc, ModbusIOException):
+            if isinstance(exc, _NoResponseType):
                 raise ModbusNoResponseError("Slave did not respond") from exc
             raise
         if response is None:
             raise ModbusNoResponseError("Empty response from Modbus slave")
-        from pymodbus.exceptions import ModbusIOException
-        if isinstance(response, ModbusIOException):
+        if isinstance(response, _NoResponseType):
             raise ModbusNoResponseError("Slave did not respond")
         if response.isError():
             raise ModbusReadError(f"Modbus FC{req.function:02d} exception: {response}")
