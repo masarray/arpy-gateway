@@ -1,0 +1,163 @@
+name: Studio GUI - Issue 4
+
+on:
+  push:
+    branches: ['feat/gui-*']
+  pull_request:
+    paths:
+      - 'src/arpy_gateway/studio/**'
+      - 'tests/test_studio_gui.py'
+      - 'tests/test_studio_v2.py'
+      - '.github/workflows/gui-studio.yml'
+      - 'pyproject.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-gui-tests:
+    name: Linux Qt / contracts / virtual 500k smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install headless Qt shared libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0
+      - name: Install optional Studio package
+        run: python -m pip install -e ".[studio]"
+      - name: Compile source and tests
+        run: python -m compileall -q src tests
+      - name: Run domain contract and new GUI tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+      - name: Capture offline GUI screenshot
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m arpy_gateway.studio --screenshot artifacts/arpy-studio-gateway-config.png
+      - name: Capture 500k-signal workspace screenshot
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QTimer
+          from PySide6.QtWidgets import QApplication
+          from arpy_gateway.studio.demo import DemoProvider
+          from arpy_gateway.studio.v2_window import StudioV2Window
+          app = QApplication([])
+          provider = DemoProvider()
+          provider.resize_demo(500_000)
+          gui = StudioV2Window(provider)
+          gui.show()
+          gui.navigation.setCurrentRow(2)
+          meter02 = gui.tree_model.find('meter01:ied:2')
+          gui.tree.setCurrentIndex(meter02)
+          def shot():
+              path = Path('artifacts/arpy-studio-500k-signal-editor.png')
+              path.parent.mkdir(parents=True, exist_ok=True)
+              ok = gui.grab().save(str(path))
+              app.exit(0 if ok else 2)
+          QTimer.singleShot(2300, shot)
+          raise SystemExit(app.exec())
+          PY
+      - name: Capture communication explorer and dark mode
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QTimer
+          from PySide6.QtWidgets import QApplication
+          from arpy_gateway.studio.v2_window import StudioV2Window
+          app = QApplication([])
+          win = StudioV2Window()
+          win.show()
+          win.navigation.setCurrentRow(1)
+          win.tree.setCurrentIndex(win.tree_model.find('peers:meter01'))
+          def capture():
+              root = Path('artifacts')
+              root.mkdir(parents=True, exist_ok=True)
+              win.grab().save(str(root / 'arpy-v2-modbus-ied-connections.png'))
+              win.tree.setCurrentIndex(win.tree_model.find('stations:scada104'))
+              win.grab().save(str(root / 'arpy-v2-iec104-asdu-stations.png'))
+              win.navigation.setCurrentRow(2)
+              win.tree.setCurrentIndex(win.tree_model.find('meter01:ied:2'))
+              win.theme.setCurrentIndex(1)
+              def capture_dark():
+                  ok = win.grab().save(str(root / 'arpy-v2-dark-meter02-signals.png'))
+                  app.exit(0 if ok else 2)
+              QTimer.singleShot(1000, capture_dark)
+          QTimer.singleShot(1200, capture)
+          raise SystemExit(app.exec())
+          PY
+      - name: Capture sliding source Signal Catalog with real selected row
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QTimer
+          from PySide6.QtWidgets import QApplication
+          from arpy_gateway.studio.v2_window import StudioV2Window
+          app = QApplication([])
+          win = StudioV2Window()
+          win.resize(1560, 860)
+          win.show()
+          win.navigation.setCurrentRow(2)
+          win.tree.setCurrentIndex(win.tree_model.find('scada104:ca:1'))
+          win.signals.assign_button.click()
+          catalog = win.catalog_drawer
+          catalog.connection.setCurrentIndex(catalog.connection.findData('meter01:ied:2'))
+          catalog.search.setText('addr:1000')
+          catalog.refresh_search()
+          def check():
+              if catalog.model.rowCount() != 1 or 0 not in catalog.model._pages:
+                  QTimer.singleShot(150, check)
+                  return
+              catalog.table.selectRow(0)
+              def capture():
+                  root = Path('artifacts')
+                  root.mkdir(parents=True, exist_ok=True)
+                  ok = win.grab().save(str(root / 'arpy-v2-slide-in-catalog-selected.png'))
+                  app.exit(0 if ok else 2)
+              QTimer.singleShot(400, capture)
+          QTimer.singleShot(1000, check)
+          QTimer.singleShot(20000, lambda: app.exit(4))
+          raise SystemExit(app.exec())
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ARPY-Studio-Issue4-QA-Screenshots
+          path: artifacts/*.png
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-preview:
+    name: Windows portable engineering-only EXE
+    needs: linux-gui-tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install GUI and packager
+        run: python -m pip install -e ".[studio]" pyinstaller
+      - name: Build unsigned GUI-only application
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name ARPY-Gateway-Studio-Preview --paths src src/arpy_gateway/studio/launcher.py
+      - name: Upload Windows preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARPY-Gateway-Studio-Issue4-Windows-Preview
+          path: dist/ARPY-Gateway-Studio-Preview.exe
+          if-no-files-found: error
+          retention-days: 14
