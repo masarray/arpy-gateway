@@ -147,6 +147,62 @@ class SavedDeviceWidgetTests(unittest.TestCase):
             modal.accept()
         QTimer.singleShot(60,set_fields)
 
+    def test_ied_connections_reads_only_sqlite_and_reappears_on_startup(self):
+        """Regression for actual field-user report: no separate Saved button."""
+        from arpy_gateway.studio.persisted_devices import TCPDeviceRepository, TCPDeviceEdit
+        repo=TCPDeviceRepository(self.path)
+        panel=self.panel
+        self.assertFalse(hasattr(self.win.config, "saved_devices_button"))
+        self.assertEqual(self.win.project.points("meter01"), ())
+        before=panel.generation
+        result=repo.save(TCPDeviceEdit("Power Meter A","192.168.1.12",502,1,1000),
+                         expected_generation=before)
+        panel.load()
+        await_ui(lambda: (not panel._busy and panel.generation==result["generation"]
+                          and len(self.win.project.points("meter01"))==1))
+        recorded=self.win.project.points("meter01")[0]
+        self.assertEqual(recorded.name,"Power Meter A")
+        self.assertEqual(recorded.params()["host"],"192.168.1.12")
+        self.win.refresh_explorer("peers:meter01")
+        node=self.win.tree_model.find("peers:meter01")
+        self.assertTrue(node.isValid())
+        self.win.tree.setCurrentIndex(node)
+        self.assertIs(self.win.config.stack.currentWidget(),panel)
+        self.assertTrue(self.win.tree_model.find(recorded.id).isValid())
+        # Reopening a brand-new Studio instance must populate Explorer/IED
+        # Connections without clicking an auxiliary "Saved Modbus" button.
+        self.win.close()
+        APP.processEvents()
+        reopened=StudioV2Window(engineering_db_path=self.path)
+        try:
+            reopened.show()
+            await_ui(lambda: (len(reopened.project.points("meter01"))==1 and
+                              not reopened.config.saved_devices._busy))
+            target=reopened.project.points("meter01")[0]
+            self.assertEqual((target.id,target.name, target.params()["host"]),
+                             (recorded.id,"Power Meter A","192.168.1.12"))
+            reopened.navigation.setCurrentRow(1)
+            await_ui(lambda: reopened.tree_model.find(target.id).isValid())
+            container=reopened.tree_model.find("peers:meter01")
+            reopened.tree.setCurrentIndex(container)
+            self.assertIs(reopened.config.stack.currentWidget(),
+                          reopened.config.saved_devices)
+            self.assertEqual(reopened.config.saved_devices.model.rows[0].id,target.id)
+            # Changing an IED name must retain the stable ID in both views.
+            repo2=TCPDeviceRepository(self.path)
+            edited=repo2.save(TCPDeviceEdit("Power Meter Renamed","192.168.1.25"),
+                              original=repo2.page()["rows"][0],
+                              expected_generation=repo2.page()["generation"])
+            reopened.config.saved_devices.load()
+            await_ui(lambda: (reopened.config.saved_devices.generation==
+                              edited["generation"] and
+                              reopened.project.points("meter01")[0].name==
+                              "Power Meter Renamed"))
+            self.assertEqual(reopened.project.points("meter01")[0].id,target.id)
+        finally:
+            reopened.close()
+            APP.processEvents()
+
     def test_add_edit_and_reopen_without_deploying(self):
         self.assertIsNone(self.win.monitor.live_panel)
         self._complete_dialog(name="Station Meter 01",host="127.0.0.11")
