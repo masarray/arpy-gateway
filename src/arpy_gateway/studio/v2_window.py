@@ -599,6 +599,9 @@ class StudioV2Window(QMainWindow):
                  engineering_db_path=None):
         super().__init__(parent)
         self.project = EngineeringView(demo or DemoProvider())
+        if engineering_db_path is not None:
+            # Do not display seeded demo IEDs during asynchronous DB startup.
+            self.project.install_saved_modbus_points(())
         self.hub = WorkerHub(self)
         self.runtime = DisconnectedRuntime(self.project.demo)
         self.runtime_endpoint = runtime_endpoint  # developer-only test endpoint
