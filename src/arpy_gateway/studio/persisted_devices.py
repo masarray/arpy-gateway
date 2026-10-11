@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QTableView,
@@ -236,7 +236,9 @@ class TCPDeviceDialog(QDialog):
 
 
 class SavedDevicesPanel(QWidget):
-    """Explicit persisted draft view; never merges IDs with the demo explorer."""
+    """Canonical persisted Modbus peer editor for Protocol Config."""
+
+    devices_changed = Signal(object)
 
     def __init__(self, hub, database_path, notify, parent=None):
         super().__init__(parent)
@@ -342,6 +344,7 @@ class SavedDevicesPanel(QWidget):
         self.generation = packet["generation"]
         self.model.set_rows(packet["rows"])
         self._has_next = packet["has_next"]
+        self.devices_changed.emit(tuple(packet["rows"]))
         self.status.setText(
             f"SAVED DRAFT · Revision generation {self.generation} · "
             f"{len(packet['rows'])} visible IED(s) · NOT DEPLOYED")
@@ -368,6 +371,14 @@ class SavedDevicesPanel(QWidget):
         selected = self.selected()
         if selected is not None:
             self._edit(selected)
+
+    def select_device(self, point_id):
+        """Navigate from an Explorer node to the canonical persisted IED."""
+        for index, point in enumerate(self.model.rows):
+            if point.id == point_id:
+                self.table.selectRow(index)
+                return True
+        return False
 
     def _edit(self, original):
         if self._busy or not self._initialized:
