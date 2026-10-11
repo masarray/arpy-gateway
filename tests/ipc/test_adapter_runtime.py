@@ -98,6 +98,42 @@ class AdapterBridgeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
+    async def test_delta_invalidated_on_stream_failure_and_no_fake_good(self):
+        fake = FakePort()
+        runtime = AdapterRuntime(make_instance(), (signal("a"),), fake)
+        server = LocalReadOnlyServer(runtime, token=TOKEN)
+        await runtime.start()
+        port = await server.start()
+        try:
+            await fake.sample("a", 10, 1)
+            await asyncio.sleep(.03)
+            initial = await request(port, TOKEN, "signals.page",
+                                    {"offset": 0, "limit": 1})
+            self.assertEqual(initial["items"][0]["quality"], "good")
+            assert initial["items"][0]["value"] == 10
+            await fake.q.put(None)
+            await asyncio.sleep(.04)
+            invalid = await request(port, TOKEN, "signals.delta", {
+                "offset": 0, "limit": 1,
+                "cursor": initial["cursor"],
+                "generation": initial["generation"],
+            })
+            self.assertTrue(invalid["resync_required"])
+            self.assertEqual(invalid["items"], [])
+            latest = await request(port, TOKEN, "signals.page",
+                                   {"offset": 0, "limit": 1})
+            self.assertEqual(latest["items"][0]["quality"], "communication_lost")
+            self.assertIsNone(latest["items"][0]["value"])
+            follow = await request(port, TOKEN, "signals.delta", {
+                "offset": 0, "limit": 1,
+                "cursor": latest["cursor"], "generation": latest["generation"],
+            })
+            self.assertFalse(follow["resync_required"])
+            self.assertEqual(follow["items"], [])
+        finally:
+            await server.stop()
+            await runtime.stop()
+
     async def test_partial_adapter_start_failure_still_closes_resources(self):
         class HalfStarted(FakePort):
             async def start(self, instance, signals):

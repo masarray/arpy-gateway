@@ -104,7 +104,8 @@ class ViewportSession:
             return {"state": self.state, "full_snapshot": full_snapshot,
                     "cursor": self.cursor, "generation": self.generation,
                     "items": list(self.items.values()), "source": packet["source"]}
-        except (OSError, ConnectionError, asyncio.TimeoutError, IPCRemoteError,
+        except (OSError, ConnectionError, asyncio.TimeoutError,
+                asyncio.IncompleteReadError, IPCRemoteError,
                 IPCFrameError, KeyError, TypeError, ValueError) as exc:
             # Never display cached "Good" as fresh while the runtime is gone.
             self.items.clear()

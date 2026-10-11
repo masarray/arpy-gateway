@@ -26,6 +26,16 @@ On unexpected sample stream termination, health becomes `DEGRADED`. **An O(1) fa
 
 Automated `tests/ipc/test_adapter_runtime.py` verifies typed sample ingestion through the official adapter port, sequence/order checks, wrong instance/family preflight, stream loss, actual IPC value pages and stop cleanup.
 
+## Monitoring IPC v2 incremental viewport refinement (read-only payload, v1 envelope unchanged)
+
+Studio can now use `ViewportSession(offset, limit)` on a **Qt worker**: the first `refresh()` loads `signals.page`, subsequent refreshes request `signals.delta` with the last `generation/cursor`. Up to **128 visible rows** receive current values; unchanged rows are not retransmitted. The client automatically performs a new snapshot when the cursor is stale, the daemon generation differs, the in-memory ring overflows, or a global communication-loss event invalidates prior quality. A lost IPC connection clears the client cache and reports `DISCONNECTED`; it never keeps rendering cached `Good` as fresh.
+
+`ViewportChanges` tracks a bounded **4,096-event monitoring ring**, independent of signal count. Updates for the same visible signal are coalesced to its latest sample, and the ring is for UI monitoring only—**never use it to deliver IEC-104 spontaneous events, command confirmations or other ordered protocol traffic**. The server does **not** retain a per-client change queue. Global link quality transition is O(1) and forces snapshot resynchronization rather than iterating all 500,000 cached signals.
+
+The read-only fixture IPC admits a hard maximum of 16 active handlers without waiting task queues; overload gets immediate connection close and increments `ipc_overloaded`. Replies exceeding the 64-KiB maximum return `RESPONSE_TOO_LARGE`, allowing the client to retry smaller pages. Management IPC security remains test-grade and will require native OS identity/ACL, roles, audit and channel review before deployment.
+
+**Integration:** GUI lane PR #12 should consume this client through its background worker and show fixture/live origin truthfully; real Modbus adapter lane PR #15 can feed `AdapterRuntime` after approved schema and immutable revision integration. Neither a live Qt viewer nor field packets are claimed in this PR.
+
 ## Required before production
 
 1. **IPC #8 security:** Windows ACL-restricted named pipe or reviewed same-machine authentication; Linux UDS peer identity and socket permissions; no developer env-token scheme, full roles, audit, key protection and replay controls.
