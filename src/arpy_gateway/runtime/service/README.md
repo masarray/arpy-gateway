@@ -18,6 +18,14 @@ In a source checkout, set `PYTHONPATH=src` and a throwaway `ARPY_IPC_TEST_TOKEN`
 
 Run `PYTHONPATH=src python -m unittest discover -s tests/ipc -v` to test with stdlib only.
 
+## Protocol adapter integration seam
+
+`AdapterRuntime` is a GUI-free supervisor that accepts an existing `ProtocolAdapter` through dependency injection. It uses the approved `ProtocolInstance`, `ProtocolSignal` and `SignalSample` types, maintains an indexed latest-only value cache, rejects unknown source IDs and stale sequence numbers, and provides the same bounded `health()/page()` projection that local IPC uses. This is the integration seam for the independently reviewed Modbus PR #15 after schema/revision gating.
+
+On unexpected sample stream termination, health becomes `DEGRADED`. **An O(1) failure flag invalidates published page values lazily**: no synchronous rewrite of 500,000 records in the asyncio event loop, no fabricated zero, and existing source timestamps remain distinguishable. The IPC view is read-only/loss-tolerant; it **must not** become the sole transport for required ordered protocol publications. Current supervisor is one injected adapter instance and does not implement auto-restart, persisted revisions or protocol-specific connector diagnostics.
+
+Automated `tests/ipc/test_adapter_runtime.py` verifies typed sample ingestion through the official adapter port, sequence/order checks, wrong instance/family preflight, stream loss, actual IPC value pages and stop cleanup.
+
 ## Required before production
 
 1. **IPC #8 security:** Windows ACL-restricted named pipe or reviewed same-machine authentication; Linux UDS peer identity and socket permissions; no developer env-token scheme, full roles, audit, key protection and replay controls.
