@@ -28,7 +28,9 @@ class LocalReadOnlyServer:
         if not 1 <= max_clients <= 64:
             raise ValueError("IPC max clients must be in 1..64")
         self.runtime, self._token = runtime, token
-        self._slots = asyncio.Semaphore(max_clients)
+        self._max_clients = max_clients
+        self._active_clients = 0
+        self._overloaded = 0
         self._server: asyncio.AbstractServer | None = None
         self._clients: set[asyncio.StreamWriter] = set()
         self._tasks: set[asyncio.Task] = set()
@@ -103,9 +105,9 @@ class LocalReadOnlyServer:
                 raise RequestFault("BAD_PARAMETERS")
             return {"api_version": API_VERSION,
                     "transport": "loopback_fixture_only",
-                    "capabilities": ["health", "signals.page", "diagnostics"],
+                    "capabilities": ["health", "signals.page", "signals.delta", "diagnostics"],
                     "mutable_operations": False,
-                    "source": "DETERMINISTIC_FIXTURE_ONLY"}
+                    "source": self.runtime.health().get("source", "UNKNOWN")}
         if method == "health":
             if params:
                 raise RequestFault("BAD_PARAMETERS")
@@ -117,25 +119,41 @@ class LocalReadOnlyServer:
                 return self.runtime.page(**params)
             except (TypeError, ValueError):
                 raise RequestFault("BAD_PARAMETERS") from None
+        if method == "signals.delta":
+            if set(params) != {"generation", "cursor", "offset", "limit"}:
+                raise RequestFault("BAD_PARAMETERS")
+            try:
+                return self.runtime.delta(**params)
+            except (TypeError, ValueError):
+                raise RequestFault("BAD_PARAMETERS") from None
         if method == "diagnostics":
             if params:
                 raise RequestFault("BAD_PARAMETERS")
             return {"ipc_rejected": self._rejected,
+                    "ipc_overloaded": self._overloaded,
+                    "ipc_active_clients": self._active_clients,
                     "runtime": self.runtime.health(),
-                    "notice": "No real protocol adapter or engineering revision deployed"}
+                    "notice": "Read-only local test IPC; active revision deployment unavailable"}
         # Mutation/control commands are deliberately absent, even when token
         # is correct. They require roles, CAS, idempotency and audit in #8.
         raise RequestFault("OPERATION_NOT_SUPPORTED")
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        if self._slots.locked():
+        # Check and reserve synchronously before the first await: unlike a
+        # semaphore waiter queue this cannot accumulate unbounded handlers.
+        if self._active_clients >= self._max_clients:
+            self._overloaded += 1
             writer.close()
-            await writer.wait_closed()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), 2.0)
+            except (OSError, asyncio.TimeoutError):
+                pass
             return
+        self._active_clients += 1
         current = asyncio.current_task()
         self._tasks.add(current)
         self._clients.add(writer)
-        async with self._slots:
+        try:
             correlation = ""
             try:
                 frame = await receive(reader)
@@ -154,13 +172,20 @@ class LocalReadOnlyServer:
                                        correlation)
             try:
                 await send(writer, response)
-            except (IPCFrameError, ConnectionError, OSError, asyncio.TimeoutError):
-                pass
-            finally:
-                self._clients.discard(writer)
-                self._tasks.discard(current)
-                writer.close()
+            except IPCFrameError:
                 try:
-                    await asyncio.wait_for(writer.wait_closed(), 2.0)
-                except (OSError, ConnectionError, asyncio.TimeoutError):
+                    await send(writer, self._reply(
+                        MessageKind.ERROR, {"code": "RESPONSE_TOO_LARGE"}, correlation))
+                except (IPCFrameError, ConnectionError, OSError, asyncio.TimeoutError):
                     pass
+            except (ConnectionError, OSError, asyncio.TimeoutError):
+                pass
+        finally:
+            self._active_clients -= 1
+            self._clients.discard(writer)
+            self._tasks.discard(current)
+            writer.close()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), 2.0)
+            except (OSError, ConnectionError, asyncio.TimeoutError):
+                pass

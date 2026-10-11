@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from arpy_gateway.domain.models import Quality, SignalOrigin, SignalSample
+from .viewport import ViewportChanges
 
 
 class FixtureRuntime:
@@ -24,6 +25,7 @@ class FixtureRuntime:
         self.latest: dict[str, SignalSample] = {}
         self._task: asyncio.Task | None = None
         self._count = 0
+        self._changes = ViewportChanges()
         self._started_at: datetime | None = None
 
     async def start(self):
@@ -43,6 +45,7 @@ class FixtureRuntime:
                 seq = old.sequence + 1 if old is not None else 1
                 self.latest[sid] = SignalSample(
                     sid, self._count, Quality.GOOD, SignalOrigin.DERIVED, now, seq)
+                self._changes.mark((self._count - 1) % len(self.signal_ids))
                 await asyncio.sleep(self.period)
         except asyncio.CancelledError:
             raise
@@ -63,6 +66,9 @@ class FixtureRuntime:
             "frames_generated": self._count,
             "signals_configured": len(self.signal_ids),
             "signals_sampled": len(self.latest),
+            "monitor_cursor": self._changes.cursor,
+            "monitor_history_depth": self._changes.depth,
+            "monitor_history_dropped": self._changes.dropped_events,
             "started_utc": self._started_at.isoformat() if self._started_at else None,
         }
 
@@ -83,4 +89,14 @@ class FixtureRuntime:
                 "observed_at": sample.observed_at.isoformat() if sample else None,
             })
         return {"total": len(self.signal_ids), "offset": offset,
-                "items": records, "source": "DETERMINISTIC_FIXTURE_ONLY"}
+                "items": records, "source": "DETERMINISTIC_FIXTURE_ONLY",
+                "generation": self._changes.generation,
+                "cursor": self._changes.cursor}
+
+    def delta(self, *, generation: str, cursor: int, offset: int, limit: int):
+        data = self._changes.changes(generation=generation, cursor=cursor,
+                                     offset=offset, limit=limit)
+        indices = data.pop("indices")
+        data["items"] = [self.page(offset=i, limit=1)["items"][0] for i in indices]
+        data["source"] = "DETERMINISTIC_FIXTURE_ONLY"
+        return data

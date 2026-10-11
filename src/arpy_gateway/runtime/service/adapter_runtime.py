@@ -14,6 +14,7 @@ from arpy_gateway.domain.models import (
     ProtocolInstance, ProtocolSignal, SignalSample, Quality,
 )
 from arpy_gateway.runtime.ports import ProtocolAdapter
+from .viewport import ViewportChanges
 
 
 class AdapterRuntime:
@@ -32,8 +33,8 @@ class AdapterRuntime:
         if len(self._signals) > 500_000:
             raise ValueError("Protocol instance configured above 500k signal limit")
         self._ids = tuple(s.id for s in self._signals)
-        self._allowed = set(self._ids)
-        if len(self._allowed) != len(self._ids):
+        self._ordinal = {sid: i for i, sid in enumerate(self._ids)}
+        if len(self._ordinal) != len(self._ids):
             raise ValueError("Duplicate stable signal ID")
         if any(s.instance_id != instance.id for s in self._signals):
             raise ValueError("Foreign signal instance")
@@ -41,6 +42,7 @@ class AdapterRuntime:
             raise ValueError("Wrong adapter protocol family")
         self._adapter = adapter
         self._latest: dict[str, SignalSample] = {}
+        self._changes = ViewportChanges()
         self._reader: asyncio.Task | None = None
         self._state = "UNCONFIGURED"
         self._received = 0
@@ -75,7 +77,8 @@ class AdapterRuntime:
             async for sample in self._adapter.samples():
                 if self._state != "RUNNING":
                     break
-                if sample.signal_id not in self._allowed:
+                index = self._ordinal.get(sample.signal_id)
+                if index is None:
                     self._ignored += 1
                     continue
                 last = self._latest.get(sample.signal_id)
@@ -85,6 +88,7 @@ class AdapterRuntime:
                 # Mutate latest O(1); never buffer unlimited per-signal history.
                 self._latest[sample.signal_id] = sample
                 self._received += 1
+                self._changes.mark(index)
             if self._state == "RUNNING":
                 self._mark_link_failed("SAMPLE_STREAM_ENDED")
         except asyncio.CancelledError:
@@ -98,6 +102,7 @@ class AdapterRuntime:
         self._state = "DEGRADED"
         self._error = reason
         self._failure_at = datetime.now(timezone.utc)
+        self._changes.invalidate()
         # Unseen samples remain unavailable; no invented zero or fresh Good.
 
     async def stop(self):
@@ -123,6 +128,9 @@ class AdapterRuntime:
             "samples_ignored": self._ignored,
             "signals_configured": len(self._ids),
             "signals_sampled": len(self._latest),
+            "monitor_cursor": self._changes.cursor,
+            "monitor_history_depth": self._changes.depth,
+            "monitor_history_dropped": self._changes.dropped_events,
             "started_utc": self._started.isoformat() if self._started else None,
             "error_code": self._error,
         }
@@ -149,4 +157,14 @@ class AdapterRuntime:
                                     if sample and sample.source_timestamp else None,
             })
         return {"total": len(self._ids), "offset": offset,
-                "items": rows, "source": "INJECTED_ADAPTER"}
+                "items": rows, "source": "INJECTED_ADAPTER",
+                "generation": self._changes.generation,
+                "cursor": self._changes.cursor}
+
+    def delta(self, *, generation: str, cursor: int, offset: int, limit: int):
+        data = self._changes.changes(generation=generation, cursor=cursor,
+                                     offset=offset, limit=limit)
+        indices = data.pop("indices")
+        data["items"] = [self.page(offset=i, limit=1)["items"][0] for i in indices]
+        data["source"] = "INJECTED_ADAPTER"
+        return data
