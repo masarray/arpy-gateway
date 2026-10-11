@@ -1,0 +1,146 @@
+"""Adapter-to-IPC supervision bridge using the accepted ProtocolAdapter port.
+
+Production source adapters are injected by composition root after approved
+config deployment; never imported directly by Studio or IPC transport.
+No per-signal worker, full-snapshot rebuild per tick or unbounded event history.
+"""
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+from typing import Sequence
+
+from arpy_gateway.domain.models import (
+    ProtocolInstance, ProtocolSignal, SignalSample, Quality,
+)
+from arpy_gateway.runtime.ports import ProtocolAdapter
+
+
+class AdapterRuntime:
+    """Own a single protocol adapter and a bounded latest-sample read model.
+
+    The adapter's lossy sample iterator is safe only for *monitoring*. Mapped
+    protocol delivery MUST consume a lossless/appropriately backpressured data
+    path in its own runtime implementation, not these IPC snapshots.
+    """
+
+    def __init__(self, instance: ProtocolInstance,
+                 signals: Sequence[ProtocolSignal],
+                 adapter: ProtocolAdapter):
+        self._instance = instance
+        self._signals = tuple(x for x in signals if x.enabled)
+        if len(self._signals) > 500_000:
+            raise ValueError("Protocol instance configured above 500k signal limit")
+        self._ids = tuple(s.id for s in self._signals)
+        self._allowed = set(self._ids)
+        if len(self._allowed) != len(self._ids):
+            raise ValueError("Duplicate stable signal ID")
+        if any(s.instance_id != instance.id for s in self._signals):
+            raise ValueError("Foreign signal instance")
+        if adapter.protocol_id != instance.protocol:
+            raise ValueError("Wrong adapter protocol family")
+        self._adapter = adapter
+        self._latest: dict[str, SignalSample] = {}
+        self._reader: asyncio.Task | None = None
+        self._state = "UNCONFIGURED"
+        self._received = 0
+        self._ignored = 0
+        self._started: datetime | None = None
+        self._error: str | None = None
+
+    async def start(self):
+        if self._state != "UNCONFIGURED":
+            raise RuntimeError("Adapter runtime already started")
+        self._state = "STARTING"
+        try:
+            await self._adapter.start(self._instance, self._signals)
+        except Exception:
+            self._state = "FAILED_TO_START"
+            # Propagate so package/deployment errors are not turned into
+            # infinite retries or falsely reported as a connected device.
+            raise
+        self._state = "RUNNING"
+        self._started = datetime.now(timezone.utc)
+        self._reader = asyncio.create_task(self._consume(),
+                                            name=f"runtime-adapter:{self._instance.id}")
+
+    async def _consume(self):
+        try:
+            async for sample in self._adapter.samples():
+                if self._state != "RUNNING":
+                    break
+                if sample.signal_id not in self._allowed:
+                    self._ignored += 1
+                    continue
+                last = self._latest.get(sample.signal_id)
+                if last is not None and sample.sequence <= last.sequence:
+                    self._ignored += 1
+                    continue
+                # Mutate latest O(1); never buffer unlimited per-signal history.
+                self._latest[sample.signal_id] = sample
+                self._received += 1
+            if self._state == "RUNNING":
+                self._mark_link_failed("SAMPLE_STREAM_ENDED")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._mark_link_failed("SAMPLE_STREAM_" + type(exc).__name__.upper())
+
+    def _mark_link_failed(self, reason: str):
+        self._state = "DEGRADED"
+        self._error = reason
+        now = datetime.now(timezone.utc)
+        for sid, old in tuple(self._latest.items()):
+            self._latest[sid] = SignalSample(
+                sid, None, Quality.COMMUNICATION_LOST, old.origin,
+                now, old.sequence + 1,
+                source_timestamp=old.source_timestamp)
+        # Values without an initial sample remain unavailable, not zero/Good.
+
+    async def stop(self):
+        self._state = "STOPPING"
+        reader, self._reader = self._reader, None
+        if reader is not None:
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
+        try:
+            await asyncio.wait_for(self._adapter.stop(), 5.0)
+        finally:
+            self._state = "STOPPED"
+
+    def health(self):
+        return {
+            "state": self._state,
+            "source": "INJECTED_ADAPTER",
+            "runtime_ready": self._state == "RUNNING",
+            "instance_id": self._instance.id,
+            "protocol": self._instance.protocol,
+            "active_revision": None,  # snapshot activation owned by #3/#8
+            "frames_generated": self._received,
+            "samples_ignored": self._ignored,
+            "signals_configured": len(self._ids),
+            "signals_sampled": len(self._latest),
+            "started_utc": self._started.isoformat() if self._started else None,
+            "error_code": self._error,
+        }
+
+    def page(self, *, offset: int, limit: int):
+        if type(offset) is not int or offset < 0:
+            raise ValueError("offset must be nonnegative integer")
+        if type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError("limit must be between 1 and 128")
+        rows = []
+        for sid in self._ids[offset:offset + limit]:
+            sample = self._latest.get(sid)
+            rows.append({
+                "signal_id": sid,
+                "value": sample.value if sample else None,
+                "quality": sample.quality.value if sample else "unavailable",
+                "origin": sample.origin.value if sample else None,
+                "sequence": sample.sequence if sample else 0,
+                "observed_at": sample.observed_at.isoformat() if sample else None,
+                "source_timestamp": sample.source_timestamp.isoformat()
+                                    if sample and sample.source_timestamp else None,
+            })
+        return {"total": len(self._ids), "offset": offset,
+                "items": rows, "source": "INJECTED_ADAPTER"}
