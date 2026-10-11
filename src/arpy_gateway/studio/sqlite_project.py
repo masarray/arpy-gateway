@@ -203,9 +203,9 @@ class SQLiteEngineeringProject:
         params.update({
             "register_table": str(record["register_table"]),
             "native_address": int(record["native_address"]),
-            "byte_order": str(record.get("byte_order","big")),
-            "word_order": str(record.get("word_order","big")),
-            "scale": float(record.get("scale",1.0)),
+            "byte_order": str(record.get("byte_order",params.get("byte_order","big"))),
+            "word_order": str(record.get("word_order",params.get("word_order","big"))),
+            "scale": float(record.get("scale",params.get("scale",1.0))),
         })
         if params["byte_order"] not in ("big","little") or params["word_order"] not in ("big","little"):
             raise ValueError("Modbus endian order must be big/little")

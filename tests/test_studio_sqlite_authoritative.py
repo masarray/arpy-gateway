@@ -144,6 +144,35 @@ class CanonicalExplorerTests(unittest.TestCase):
         finally:
             fresh.close();APP.processEvents()
 
+    def test_modbus_endian_scale_and_metadata_survive_save_reopen(self):
+        project=SQLiteEngineeringProject(self.db)
+        gen=project.topology().generation
+        iid=project.devices.instance_id
+        saved=project.save_signal(iid,self.old["id"],{
+            "name":"Total active energy","family":"counter","value_type":"uint32",
+            "direction":"inbound","register_table":"holding",
+            "native_address":1234,"byte_order":"little",
+            "word_order":"little","scale":0.01,"unit":"kWh","enabled":True,
+        },expected_generation=gen)
+        page=project.signal_page(iid,communication_point_id=self.old["id"])
+        self.assertEqual(len(page["rows"]),1)
+        point=page["rows"][0][0]
+        self.assertEqual(point.parameters["word_order"],"little")
+        self.assertEqual(point.parameters["byte_order"],"little")
+        self.assertEqual(point.parameters["scale"],0.01)
+        self.assertEqual(point.id,saved["id"])
+        changed=project.save_signal(iid,self.old["id"],{
+            "name":"Total energy renamed","family":"counter","value_type":"uint32",
+            "direction":"inbound","register_table":"holding",
+            "native_address":1234,"unit":"kWh","enabled":True,
+        },expected_generation=saved["generation"],original=point)
+        reopened=SQLiteEngineeringProject(self.db)
+        again=reopened.signal_page(iid,communication_point_id=self.old["id"])
+        self.assertEqual(again["rows"][0][0].id,point.id)
+        self.assertEqual(again["rows"][0][0].parameters["scale"],0.01)
+        self.assertEqual(again["rows"][0][0].parameters["word_order"],"little")
+        self.assertEqual(changed["generation"],saved["generation"]+1)
+
     def test_protocol_mapping_is_sqlite_not_a_demo_catalog(self):
         self.win.navigation.setCurrentRow(3)
         wait_for(lambda:not self.win.busy)
