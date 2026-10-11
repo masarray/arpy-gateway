@@ -81,6 +81,16 @@ class CatalogSource:
         if not query:
             return CatalogLookup("", self.source.row_count(), None)
         low = query.casefold()
+        compact = "".join(low.split())
+        # Generated engineering names expose stable sequence suffixes. Resolve
+        # exact signal name suffix algebraically instead of scanning 500k rows.
+        named = re.search(r"voltage\s*(\d{1,7})$", low)
+        if named:
+            index = int(named.group(1)) - 1
+            owner = self.source.owner_name(index) if self.source.contains(index) else ""
+            if self.source.contains(index) and (not low.startswith("meter") or
+                    compact.startswith("".join(owner.casefold().split()))):
+                return CatalogLookup(query, 1, (index,))
         if low in ("voltage", "volt", "analog"):
             # Synthetic demo base is generated in address order; production
             # DB implements genuine indexed name search under STORE #3.
@@ -115,13 +125,13 @@ class CatalogSource:
             if candidate is None:
                 candidate = self.source.owner_name(idx).replace(" ", "") + (
                     " / Voltage " + f"{idx+1:06d}")
-            if low in candidate.casefold():
+            if compact in "".join(candidate.casefold().split()):
                 indexes.append(idx)
                 if len(indexes) > MAX_SEARCH_MATCHES:
                     break
         if len(indexes) <= MAX_SEARCH_MATCHES:
             for idx in self.source._extra():
-                if low in self._display(idx)[1].casefold():
+                if compact in "".join(self._display(idx)[1].casefold().split()):
                     indexes.append(idx)
                     if len(indexes) > MAX_SEARCH_MATCHES:
                         break
