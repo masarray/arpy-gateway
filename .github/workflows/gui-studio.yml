@@ -2,7 +2,7 @@ name: Studio GUI - Issue 4
 
 on:
   push:
-    branches: ['feat/gui-*']
+    branches: ['feat/gui-*', 'fix/gui-*']
   pull_request:
     paths:
       - 'src/arpy_gateway/studio/**'
@@ -11,6 +11,7 @@ on:
       - 'tests/test_studio_live_ipc.py'
       - 'tests/test_studio_modbus_ipc.py'
       - 'tests/test_studio_saved_devices.py'
+      - 'tests/test_studio_sqlite_authoritative.py'
       - '.github/workflows/gui-studio.yml'
       - 'pyproject.toml'
   workflow_dispatch:
@@ -66,7 +67,7 @@ jobs:
       - name: Capture offline GUI screenshot
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m arpy_gateway.studio --screenshot artifacts/arpy-studio-gateway-config.png
+        run: python -m arpy_gateway.studio --demo --screenshot artifacts/arpy-studio-gateway-config.png
       - name: Capture 500k-signal workspace screenshot
         env:
           QT_QPA_PLATFORM: offscreen
@@ -196,6 +197,8 @@ jobs:
           git fetch --no-tags origin feat/store-revisioned-sqlite-issue3
           test "$(git rev-parse FETCH_HEAD)" = "8868f715f27b7eb36fd2740be24493576a27b306"
           git checkout FETCH_HEAD -- src/arpy_gateway/engineering
+      - name: Assert installed launcher uses persisted SQLite, not DemoProvider
+        run: python -c "from arpy_gateway.studio.sqlite_window import SQLiteStudioWindow; from arpy_gateway.studio.sqlite_project import SQLiteEngineeringProject; print('SQLite-first production GUI available')"
       - name: Compile Studio, Store and pinned protocol client
         run: python -m compileall -q src tests/test_studio_saved_devices.py
       - name: Qt regression including IPC/actual Modbus + Add/Edit/SQLite Reopen
