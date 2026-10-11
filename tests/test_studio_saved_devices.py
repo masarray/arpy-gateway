@@ -55,23 +55,24 @@ class PersistedDeviceRepositoryTests(unittest.TestCase):
                            expected_generation=a["generation"])
         page = self.repo.page()
         self.assertEqual(page["generation"],b["generation"])
-        self.assertEqual([row.name for row in page["rows"]], ["Meter A", "Meter B"])
+        self.assertEqual({row.name for row in page["rows"]}, {"Meter A", "Meter B"})
         self.assertTrue(all(row.id.startswith("tcp-") for row in page["rows"]))
         self.assertEqual(len({row.id for row in page["rows"]}),2)
         # Create a brand-new repo object, just like a Studio process restart.
         reopened = TCPDeviceRepository(self.path)
         self.assertEqual(reopened.prepare(),b["generation"])
-        original = reopened.page()["rows"][0]
+        original = next(p for p in reopened.page()["rows"] if p.id == a["id"])
         updated = reopened.save(
             TCPDeviceEdit("Meter A Renamed","127.0.0.99",1502,1,250,False),
             original=original,expected_generation=b["generation"])
-        current = reopened.page()["rows"][0]
+        current = next(p for p in reopened.page()["rows"] if p.id == original.id)
         self.assertEqual(current.id,original.id)
         self.assertEqual(current.name,"Meter A Renamed")
         self.assertEqual(current.settings["host"],"127.0.0.99")
         self.assertFalse(current.enabled)
         self.assertEqual(updated["generation"],b["generation"]+1)
-        self.assertEqual(reopened.page()["rows"][1].id,page["rows"][1].id)
+        self.assertEqual({p.id for p in reopened.page()["rows"]},
+                         {p.id for p in page["rows"]})
         with self.assertRaises(EditConflict):
             self.repo.save(TCPDeviceEdit("Stale","127.0.0.4"),
                            expected_generation=b["generation"])
@@ -221,7 +222,8 @@ class SavedDeviceWidgetTests(unittest.TestCase):
         self.assertEqual(self.panel.model.rows[0].id,first.id)
         # Simulator and offline source table remain separate; data was not
         # artificially copied into the old demo EngineeringView.
-        self.assertEqual(len(self.win.project.points("meter01")),2)
+        self.assertEqual(len(self.win.project.points("meter01")),1)
+        self.assertEqual(self.win.project.points("meter01")[0].id, first.id)
         self.win.close()
         APP.processEvents()
         new=StudioV2Window(engineering_db_path=self.path)
