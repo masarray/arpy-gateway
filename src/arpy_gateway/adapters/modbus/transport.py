@@ -13,6 +13,45 @@ class ModbusReadError(Exception):
     """Validated Modbus exception/response error (not a valid measurement)."""
 
 
+class ModbusNoResponseError(ModbusReadError):
+    """A slave did not answer. It does not imply the shared RS-485 port failed."""
+
+
+class ModbusBundleError(RuntimeError):
+    """Required embedded protocol transport is absent or mismatched."""
+
+
+REQUIRED_PYMODBUS = "3.15.0"
+
+
+def verify_embedded_transport(protocol: str) -> None:
+    """Fail fast during daemon startup, never pip-install on a live gateway.
+
+    A packager MUST include PyModbus and PySerial in the installer; optional
+    source-only developer workflows may install them separately.
+    """
+    try:
+        import pymodbus
+        from pymodbus.client import AsyncModbusTcpClient
+        if protocol == "modbus_rtu":
+            import serial
+            from pymodbus.client import AsyncModbusSerialClient
+        elif protocol != "modbus_tcp":
+            raise ValueError("Unsupported Modbus transport")
+    except ImportError as exc:
+        raise ModbusBundleError(
+            "Bundled Modbus engine is missing. Repair/reinstall ARPY Gateway; "
+            "no user command or online download is required."
+        ) from exc
+    found = getattr(pymodbus, "__version__", None)
+    if found != REQUIRED_PYMODBUS:
+        raise ModbusBundleError(
+            f"Incompatible bundled Modbus engine ({found or 'unknown'}); "
+            f"ARPY requires tested PyModbus {REQUIRED_PYMODBUS}. "
+            "Repair installation instead of upgrading packages at runtime."
+        )
+
+
 class PymodbusClient:
     def __init__(self, client):
         self.client = client
@@ -25,9 +64,22 @@ class PymodbusClient:
     async def read(self, req: ReadRequest, unit_id: int) -> tuple[int | bool, ...]:
         names = {1: "read_coils", 2: "read_discrete_inputs",
                  3: "read_holding_registers", 4: "read_input_registers"}
-        response = await getattr(self.client, names[req.function])(
-            address=req.address, count=req.count, device_id=unit_id)
-        if response is None or response.isError():
+        try:
+            response = await getattr(self.client, names[req.function])(
+                address=req.address, count=req.count, device_id=unit_id)
+        except Exception as exc:
+            # PyModbus raises ModbusIOException for a missing response (not a
+            # device ExceptionResponse). Other transport faults need reconnect.
+            from pymodbus.exceptions import ModbusIOException
+            if isinstance(exc, ModbusIOException):
+                raise ModbusNoResponseError("Slave did not respond") from exc
+            raise
+        if response is None:
+            raise ModbusNoResponseError("Empty response from Modbus slave")
+        from pymodbus.exceptions import ModbusIOException
+        if isinstance(response, ModbusIOException):
+            raise ModbusNoResponseError("Slave did not respond")
+        if response.isError():
             raise ModbusReadError(f"Modbus FC{req.function:02d} exception: {response}")
         payload = response.bits if req.function in (1, 2) else response.registers
         if payload is None or len(payload) < req.count:
@@ -39,11 +91,14 @@ class PymodbusClient:
 
 
 class PymodbusFactory:
+    def preflight(self, protocol: str) -> None:
+        verify_embedded_transport(protocol)
+
     def tcp(self, device: DeviceConfig):
         try:
             from pymodbus.client import AsyncModbusTcpClient
         except ImportError as exc:
-            raise RuntimeError("Install optional transport: pymodbus==3.15.0") from exc
+            raise ModbusBundleError("Bundled Modbus TCP engine missing; repair ARPY installation") from exc
         return PymodbusClient(AsyncModbusTcpClient(
             device.host, port=device.port, timeout=device.timeout_ms/1000,
             retries=0, reconnect_delay=1, reconnect_delay_max=10))
@@ -52,7 +107,7 @@ class PymodbusFactory:
         try:
             from pymodbus.client import AsyncModbusSerialClient
         except ImportError as exc:
-            raise RuntimeError("Install pymodbus[serial]==3.15.0") from exc
+            raise ModbusBundleError("Bundled Modbus RTU/serial engine missing; repair ARPY installation") from exc
         options = validate_serial(instance)
         return PymodbusClient(AsyncModbusSerialClient(
             **options, timeout=timeout_seconds, retries=0))

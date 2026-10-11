@@ -18,7 +18,7 @@ from arpy_gateway.runtime.ports import ProtocolAdapter
 from .configuration import DeviceConfig, ParsedSignal, parse_signal, validate_serial
 from .encoding import decode_value
 from .planner import ReadRequest, compile_reads
-from .transport import ModbusReadError, PymodbusFactory
+from .transport import ModbusReadError, ModbusNoResponseError, PymodbusFactory
 
 
 class DeviceState(str, Enum):
@@ -97,6 +97,12 @@ class ModbusClientAdapter(ProtocolAdapter):
             validate_serial(instance)  # verify before spawning tasks
             if len({d.unit_id for d in self._devices if d.enabled}) != sum(d.enabled for d in self._devices):
                 raise ValueError("Duplicate RTU slave ID on one physical bus")
+        # Packaging is checked before sockets/tasks: a broken installer is a
+        # definitive startup error, not an infinite "IED offline" retry loop.
+        if instance.enabled and any(d.enabled for d in self._devices):
+            preflight = getattr(self._factory, "preflight", None)
+            if preflight is not None:
+                preflight(instance.protocol)
         configured = []
         for signal in signals:
             if signal.instance_id != instance.id:
@@ -193,7 +199,8 @@ class ModbusClientAdapter(ProtocolAdapter):
                         self._sample(point, None, Quality.COMMUNICATION_LOST)
                     seen.add(sid)
 
-    async def _poll(self, device: DeviceConfig, client, requests: Sequence[ReadRequest]):
+    async def _poll(self, device: DeviceConfig, client, requests: Sequence[ReadRequest],
+                    *, shared_serial: bool = False) -> bool:
         for req in requests:
             try:
                 # library timeout and outer deadline prevent indefinite socket stalls
@@ -212,6 +219,16 @@ class ModbusClientAdapter(ProtocolAdapter):
                 self._status(device, DeviceState.DEGRADED if invalid_count else DeviceState.ONLINE,
                              ok=1, errors=invalid_count,
                              message="DECODE_INVALID" if invalid_count else "")
+            except ModbusNoResponseError as exc:
+                # RTU no-response is normally one unavailable slave, not a
+                # broken serial bus; never starve other unit IDs by reopening
+                # the port for every silent slave. TCP reconnects the IED.
+                if shared_serial:
+                    self._status(device, DeviceState.OFFLINE, errors=1,
+                                 message="SLAVE_NO_RESPONSE")
+                    self._lost(requests)
+                    return False
+                raise ConnectionError("Modbus TCP slave did not respond") from exc
             except ModbusReadError:
                 for point in req.points:
                     self._sample(point, None, Quality.INVALID)
@@ -221,6 +238,7 @@ class ModbusClientAdapter(ProtocolAdapter):
                 self._status(device, DeviceState.OFFLINE, errors=1,
                              message=f"TRANSPORT_{type(exc).__name__.upper()}")
                 raise ConnectionError("Device link lost") from exc
+        return True
 
     async def _backoff(self, attempt: int):
         delay = min(self._retry_limit, 0.5 * (2 ** min(attempt, 6)))
@@ -276,6 +294,7 @@ class ModbusClientAdapter(ProtocolAdapter):
                 # fastest device interval. Traffic is strictly sequential.
                 loop = asyncio.get_running_loop()
                 due = {d.id: loop.time() for d in devices}
+                silent = {d.id: 0 for d in devices}
                 while self._running:
                     now = loop.time()
                     ready = [d for d in devices if due[d.id] <= now]
@@ -285,8 +304,17 @@ class ModbusClientAdapter(ProtocolAdapter):
                     # Stable round-robin tie break; no task per slave or signal.
                     for d in ready:
                         started = loop.time()
-                        await self._poll(d, client, by_device.get(d.id, ()))
-                        due[d.id] = max(started + d.poll_ms/1000, loop.time())
+                        responded = await self._poll(d, client, by_device.get(d.id, ()),
+                                                     shared_serial=True)
+                        if responded:
+                            silent[d.id] = 0
+                            due[d.id] = max(started + d.poll_ms/1000, loop.time())
+                        else:
+                            silent[d.id] += 1
+                            delay = min(self._retry_limit, 0.5 *
+                                        (2 ** min(silent[d.id], 6)))
+                            due[d.id] = max(started + d.poll_ms/1000,
+                                            loop.time() + delay)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
