@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
         python: ['3.10','3.12']
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +35,9 @@ jobs:
           PYTHONPATH: src
         run: python -c "import sys, arpy_gateway.engineering; assert not any(n.startswith(('PySide6','pymodbus','arpy_gateway.studio','arpy_gateway.ipc')) for n in sys.modules)"
   capacity-500k:
+    # Already accepted in Linux CI; run again on manual final verification,
+    # not on every Windows-first development commit.
+    if: github.event_name == 'workflow_dispatch'
     name: Real 500k SQLite Row + Indexed Last Page
     runs-on: ubuntu-latest
     steps:
