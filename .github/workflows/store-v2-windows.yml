@@ -1,0 +1,44 @@
+name: Store RFC13 v2 Upgrade Windows Gate
+on:
+  push:
+    branches: ['feat/store-*']
+  pull_request:
+    paths:
+      - 'src/arpy_gateway/engineering/store_v2.py'
+      - 'tests/test_store_v2.py'
+      - '.github/workflows/store-v2-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  storage-v2-windows:
+    name: SQLite v2 Windows ${{ matrix.python }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10','3.12']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Overlay pinned RFC13 v2 contract candidate in CI only
+        shell: bash
+        run: |
+          git fetch --no-tags origin feat/arch13-device-station-v2
+          pinned="17c4c764d6a41bc4d73bf62c79accbf4183ef3db"
+          test "$(git rev-parse FETCH_HEAD)" = "$pinned"
+          git checkout "$pinned" -- src/arpy_gateway/domain/v2.py src/arpy_gateway/domain/validation_v2.py src/arpy_gateway/contracts/project_v2.py contracts/project.v2.schema.json
+      - name: Compile SQLite, v2 codec and tests
+        run: python -m compileall -q src/arpy_gateway/engineering src/arpy_gateway/domain src/arpy_gateway/contracts tests/test_store_v2.py
+      - name: Windows SQLite v1→v2 persistence, transaction and journal tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_store_v2.py' -v
+      - name: Check v1 Store regression untouched
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_store_v1.py' -v
