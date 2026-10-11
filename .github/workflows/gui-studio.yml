@@ -9,6 +9,7 @@ on:
       - 'tests/test_studio_gui.py'
       - 'tests/test_studio_v2.py'
       - 'tests/test_studio_live_ipc.py'
+      - 'tests/test_studio_modbus_ipc.py'
       - '.github/workflows/gui-studio.yml'
       - 'pyproject.toml'
   workflow_dispatch:
@@ -42,6 +43,17 @@ jobs:
           echo "Pinned IPC client and fixture imported from $pinned"
       - name: Validate read-only IPC module imports
         run: python -c "from arpy_gateway.ipc.client import ViewportSession; print('Versioned IPC viewer client ready')"
+      - name: Overlay pinned Modbus adapter for end-to-end GUI CI (PR #15)
+        shell: bash
+        run: |
+          git fetch --no-tags origin feat/6-modbus-async-engine
+          pinned="cb94de62d49bdb3c3151f7cd472311911442f241"
+          test "$(git rev-parse FETCH_HEAD)" = "$pinned"
+          git checkout "$pinned" -- src/arpy_gateway/adapters/modbus
+      - name: Install Modbus transport on CI runner only, never at gateway runtime
+        run: python -m pip install "pymodbus[serial]==3.15.0"
+      - name: Verify actual IPC and Modbus sources are present
+        run: python -c "from arpy_gateway.runtime.service.modbus_bridge import build_modbus_runtime; from arpy_gateway.adapters.modbus import ModbusClientAdapter; print('Pinned Modbus bridge ready')"
       - name: Compile source and tests
         run: python -m compileall -q src tests
       - name: Run domain contract and new GUI tests
