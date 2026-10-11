@@ -7,6 +7,8 @@ No simulated IED rows, no invented runtime samples, no deploy on Save.
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
+from arpy_gateway.domain.models import to_mutable
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, QModelIndex, QAbstractTableModel
@@ -207,6 +209,27 @@ class SQLiteStudioWindow(QMainWindow):
         self.stations.hide();c.addWidget(self.stations,1)
         self.add_station=self._button("+ Add Data Station",self.create_station)
         self.add_station.hide();c.addWidget(self.add_station)
+        self.edit_station=self._button("Edit Selected Station",self.edit_station_dialog)
+        self.edit_station.hide();c.addWidget(self.edit_station)
+        self.general_panel=QWidget(self)
+        gp=QVBoxLayout(self.general_panel)
+        form=QFormLayout()
+        self.general_name=QLineEdit()
+        self.general_enabled=QCheckBox("Enabled")
+        self.general_identity=QLabel("Selected protocol instance")
+        self.general_identity.setWordWrap(True)
+        form.addRow("Protocol / Role",self.general_identity)
+        form.addRow("Instance name",self.general_name)
+        form.addRow("Instance status",self.general_enabled)
+        self.general_fields={}
+        self.general_dynamic=QFormLayout()
+        gp.addLayout(form)
+        gp.addLayout(self.general_dynamic)
+        self.save_general=self._button("Save General Settings",self.save_general_settings)
+        gp.addWidget(self.save_general)
+        gp.addStretch()
+        self.general_panel.hide()
+        c.addWidget(self.general_panel,1)
         self.note=QLabel("Only saved IEDs are shown here. No demo Meter 01 / Meter 02.")
         c.addWidget(self.note)
         self.pages.addWidget(config)
@@ -352,19 +375,70 @@ class SQLiteStudioWindow(QMainWindow):
         instance=next((x for x in self.topology.instance_rows if x.id==iid),None)
         if not instance:return
         station=self.node_kind in ("stations","station")
+        general=self.node_kind=="general"
         self.connection_title.setText(
-            instance.name+" / "+("ASDU Stations" if station else "IED Connections"))
-        self.devices.setVisible(not station)
-        self.stations.setVisible(station)
-        self.add_station.setVisible(station)
-        self.add_ied.setVisible(not station and instance.protocol=="modbus_tcp")
+            instance.name+" / "+("General Settings" if general else
+                                  "ASDU Stations" if station else "IED Connections"))
+        self.general_panel.setVisible(general)
+        self.devices.setVisible(not station and not general)
+        self.stations.setVisible(station and not general)
+        self.add_station.setVisible(station and not general)
+        self.edit_station.setVisible(station and not general)
+        self.add_ied.setVisible(not station and not general
+                                and instance.id==self.repo.devices.instance_id)
         self.edit_ied.setVisible(self.add_ied.isVisible())
-        if station:
+        if general:
+            self._general_form(instance)
+        elif station:
             self._run(lambda:self.repo.stations(iid),self.stations_model.replace)
         else:
             scope=self.scope_id if self.node_kind=="peer" else ""
             self._run(lambda:self.repo.connections(iid),
                       lambda rows:self._loaded_devices(rows,scope))
+
+    def _general_form(self,instance):
+        self.general_name.setText(instance.name)
+        self.general_enabled.setChecked(instance.enabled)
+        self.general_identity.setText(
+            f"{instance.protocol} / {instance.role.value} · stable ID: {instance.id}")
+        while self.general_dynamic.rowCount():
+            self.general_dynamic.removeRow(0)
+        self.general_fields={}
+        for key,value in sorted(instance.settings.items()):
+            editor=QLineEdit(str(value))
+            editor.setMaximumWidth(340)
+            self.general_dynamic.addRow(key.replace("_"," ").title(),editor)
+            self.general_fields[key]=(editor,value)
+
+    def save_general_settings(self):
+        instance=next((i for i in self.topology.instance_rows
+                       if i.id==self.instance_id),None)
+        if instance is None:return
+        values=to_mutable(instance.settings)
+        for key,(editor,prior) in self.general_fields.items():
+            raw=editor.text()
+            if type(prior) is bool:
+                if raw.lower() not in ("true","false","1","0"):
+                    self.statusBar().showMessage(f"Invalid boolean for {key}",9000)
+                    return
+                values[key]=raw.lower() in ("true","1")
+            elif type(prior) is int:
+                try:values[key]=int(raw)
+                except ValueError:
+                    self.statusBar().showMessage(f"Invalid integer for {key}",9000)
+                    return
+            elif type(prior) is float:
+                try:values[key]=float(raw)
+                except ValueError:
+                    self.statusBar().showMessage(f"Invalid number for {key}",9000)
+                    return
+            else:
+                values[key]=raw
+        item=replace(instance,name=self.general_name.text().strip(),
+                     enabled=self.general_enabled.isChecked(),settings=values)
+        gen=self.topology.generation
+        self._run(lambda:self.repo.save_instance(
+            item,expected_generation=gen),self._saved)
 
     def _loaded_devices(self,rows,scope=""):
         self.devices_model.set_rows(rows)
@@ -414,6 +488,8 @@ class SQLiteStudioWindow(QMainWindow):
             getattr(self,name).setEnabled(ready)
         self.edit_ied.setEnabled(ready and self._selected_device() is not None)
         self.edit_signal.setEnabled(ready and self._selected_signal() is not None)
+        self.save_general.setEnabled(ready)
+        self.edit_station.setEnabled(ready and self.stations.currentIndex().isValid())
         self.next_signal.setEnabled(ready and self.signal_more)
         self.next_mapping.setEnabled(ready and self.mapping_more)
 
@@ -502,6 +578,20 @@ class SQLiteStudioWindow(QMainWindow):
         gen=self.topology.generation
         self._run(lambda:self.repo.save_station(
             iid,f"ASDU CA {ca}",ca,expected_generation=gen),self._saved)
+
+    def edit_station_dialog(self):
+        index=self.stations.currentIndex()
+        if not index.isValid() or index.row()>=len(self.stations_model.rows):
+            return
+        item=self.stations_model.rows[index.row()]
+        ca,ok=QInputDialog.getInt(
+            self,"Edit IEC104 Data Station","Common Address",
+            int(item.settings.get("common_address",1)),1,65534)
+        if not ok:return
+        gen=self.topology.generation
+        self._run(lambda:self.repo.save_station(
+            item.instance_id,item.name,ca,expected_generation=gen,original=item),
+            self._saved)
 
     def stage(self):
         gen=self.topology.generation
