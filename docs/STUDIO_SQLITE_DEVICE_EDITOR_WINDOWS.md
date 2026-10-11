@@ -1,3 +1,5 @@
+> **P0 USER FEEDBACK / BLOCKED FOR STANDARD GATEWAY UX (2026-10-11):** This preview's separate SQLite Saved Devices panel is **not integrated with the standard Protocol Explorer → IED Connections**. The tree, normal connection grid, General Settings, and other engineering editors still use `EngineeringView(DemoProvider)`, so saved devices appear only after pressing the extra Saved Devices button. This is a verified architectural source-of-truth defect, **not** an accepted gateway workflow. **Start next work with [the single-source-of-truth handoff](handoffs/2026-10-11-studio-single-source-of-truth.md)**. Do not present this standalone preview as complete persisted device configuration, and do not merge PR #23 before the P0 is fixed and Windows GUI/EXE regression passes.
+
 # Windows-first SQLite Device Draft Editor — Issue #17
 
 **Engineering preview candidate; not an installed gateway or active Deploy.**
