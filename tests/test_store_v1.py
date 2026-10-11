@@ -109,7 +109,13 @@ class StoreTests(unittest.TestCase):
 
     def test_unknown_future_schema_rejected(self):
         self.store.close()
-        with sqlite3.connect(self.db) as db: db.execute("PRAGMA user_version=99")
+        db = sqlite3.connect(self.db)
+        try:
+            db.execute("PRAGMA user_version=99")
+            db.commit()
+        finally:
+            # Connection context manager commits but does not close on Windows.
+            db.close()
         with self.assertRaisesRegex(RuntimeError,"migration required"):
             EngineeringStore(self.db)
 
