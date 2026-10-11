@@ -169,6 +169,11 @@ class V2StoreTests(unittest.TestCase):
         gen=self.store.apply_v2("plant",expected_generation=gen,
                                 communication_points=peers)
         self.assertEqual(len(self.store.load_draft_v2("plant").communication_points),1000)
+        self.assertEqual([p.id for p in self.store.communication_point_page(
+            "plant","mb",after_id="device:00997",limit=2)],
+            ["device:00998","device:00999"])
+        with self.assertRaises(ValueError):
+            self.store.communication_point_page("plant","mb",limit=257)
         self.store.close()
         with EngineeringStoreV2(self.file) as reopened:
             self.assertEqual(reopened.generation("plant"),gen)

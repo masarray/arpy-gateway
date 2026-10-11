@@ -320,6 +320,36 @@ class EngineeringStoreV2(EngineeringStore):
         with self._read() as con:
             return self._snapshot_v2(con,project_id)
 
+    def communication_point_page(self,project_id,instance_id,*,after_id="",limit=256):
+        """Stable-keyset page for GUI Device Explorer, O(page), not full scan."""
+        self._require_v2()
+        from arpy_gateway.domain.v2 import CommunicationPoint
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("IED page limit must be 1..256")
+        if type(after_id) is not str:
+            raise ValueError("IED page cursor must be a stable ID")
+        with self._read() as db:
+            rows=db.execute(
+                "SELECT record FROM communication_points WHERE project_id=? "
+                "AND instance_id=? AND id>? ORDER BY id LIMIT ?",
+                (project_id,instance_id,after_id,limit)).fetchall()
+        return tuple(CommunicationPoint(**json.loads(row[0])) for row in rows)
+
+    def data_station_page(self,project_id,instance_id,*,after_id="",limit=256):
+        """Independent station/CA namespace, never list allowed SCADA masters."""
+        self._require_v2()
+        from arpy_gateway.domain.v2 import DataStation
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("Station page limit must be 1..256")
+        if type(after_id) is not str:
+            raise ValueError("Station page cursor must be stable ID")
+        with self._read() as db:
+            rows=db.execute(
+                "SELECT record FROM data_stations WHERE project_id=? "
+                "AND instance_id=? AND id>? ORDER BY id LIMIT ?",
+                (project_id,instance_id,after_id,limit)).fetchall()
+        return tuple(DataStation(**json.loads(row[0])) for row in rows)
+
     def stage(self,*args,**kwargs):
         if self._db_version == 2:
             raise RuntimeError("Cannot stage incomplete v1 subset from v2 database; use stage_v2")
