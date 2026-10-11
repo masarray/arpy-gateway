@@ -32,6 +32,13 @@
 | PySide6 Value Viewer live | **NOT IMPLEMENTED in Modbus lane** | GUI #4 binds to paged runtime IPC #8 |
 | HA active/standby redundancy | **RFC only**, must prevent two active poll/publish/control owners | Proposed issue, not current behavior |
 
+
+## Embedded end-user packaging requirement
+
+**End users must never install Python/PyModbus manually or run the diagnostic CLI.** PyModbus 3.15.0 plus the serial extra are internal, version-pinned dependencies of the future self-contained Windows/Linux gateway runtime package. Bundle health is checked during service startup; incompatible/missing transport triggers installer repair guidance, not perpetual device reconnect. Transport networking remains independent of PySide6, and the installed daemon must survive Studio close/logout.
+
+**Full packaging/QA handoff:** [BUNDLING_CONTRACT.md](BUNDLING_CONTRACT.md). The headless JSON probe below is **for developers and protocol QA only** and must not appear in the customer GUI workflow.
+
 ## Local headless device/value probe (without GUI)
 
 Install tested dependency: `python -m pip install "pymodbus[serial]==3.15.0"` and run:

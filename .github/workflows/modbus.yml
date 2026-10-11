@@ -28,6 +28,12 @@ jobs:
         run: python -m pip install "pymodbus[serial]==3.15.0"
       - name: Check PyModbus compatibility
         run: python -c "import pymodbus; assert pymodbus.__version__ == '3.15.0'"
+      - name: Check embedded TCP and RTU transport preflight
+        env:
+          PYTHONPATH: src
+        run: python -c "from arpy_gateway.adapters.modbus.transport import verify_embedded_transport; verify_embedded_transport('modbus_tcp'); verify_embedded_transport('modbus_rtu'); print('Bundled transport imports OK')"
+      - name: Dependency compatibility
+        run: python -m pip check
       - name: Compile Modbus adapter and tests
         run: python -m compileall -q src/arpy_gateway/adapters/modbus tests/modbus
       - name: Run all Modbus loopback / independent client tests
