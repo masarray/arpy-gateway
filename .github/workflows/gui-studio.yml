@@ -238,6 +238,10 @@ jobs:
           git checkout FETCH_HEAD -- src/arpy_gateway/engineering
       - name: Build unsigned GUI engineering preview with bundled SQLite v2
         run: pyinstaller --noconfirm --clean --onefile --windowed --name ARPY-Gateway-Studio-Preview --paths src --hidden-import arpy_gateway.engineering.store_v2 --hidden-import arpy_gateway.domain.v2 --hidden-import arpy_gateway.domain.validation_v2 --hidden-import arpy_gateway.contracts.project_v2 src/arpy_gateway/studio/launcher.py
+      - name: Smoke test the standalone EXE without PYTHONPATH or runtime pip
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -c "from pathlib import Path; import subprocess; p=Path('artifacts/windows-standalone-studio.png'); p.parent.mkdir(parents=True,exist_ok=True); subprocess.run(['dist/ARPY-Gateway-Studio-Preview.exe','--screenshot',str(p)],check=True,timeout=90); assert p.is_file() and p.stat().st_size>1000, 'Standalone EXE failed GUI screenshot smoke'"
       - name: Upload Windows preview
         uses: actions/upload-artifact@v4
         with:
