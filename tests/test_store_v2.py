@@ -102,7 +102,9 @@ class V2StoreTests(unittest.TestCase):
             mappings=(MappingDefinition("map","s1","out"),))
         snapshot=self.store.load_draft_v2("plant")
         self.assertEqual(len(snapshot.communication_points),4)
-        self.assertEqual(snapshot.signal_bindings[0].communication_point_id,"meter1")
+        by_signal = {binding.signal_id: binding for binding in snapshot.signal_bindings}
+        self.assertEqual(by_signal["s1"].communication_point_id,"meter1")
+        self.assertEqual(by_signal["out"].data_station_id,"station")
         revision=self.store.stage_v2("plant",expected_generation=gen)
         self.assertEqual(self.store.revision_v2("plant",revision.digest),snapshot)
         self.store.close()
