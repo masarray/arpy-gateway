@@ -126,6 +126,7 @@ class AdapterRuntime:
             "active_revision": None,  # snapshot activation owned by #3/#8
             "frames_generated": self._received,
             "samples_ignored": self._ignored,
+            "adapter_monitor_dropped": int(getattr(self._adapter, "dropped_notifications", 0)),
             "signals_configured": len(self._ids),
             "signals_sampled": len(self._latest),
             "monitor_cursor": self._changes.cursor,
@@ -160,6 +161,13 @@ class AdapterRuntime:
                 "items": rows, "source": "INJECTED_ADAPTER",
                 "generation": self._changes.generation,
                 "cursor": self._changes.cursor}
+
+    def device_page(self, *, offset: int, limit: int):
+        """Read-only paged transport-health capability if adapter exports it."""
+        page = getattr(self._adapter, "device_page", None)
+        if not callable(page):
+            raise ValueError("Device status view unavailable for this adapter")
+        return page(offset=offset, limit=limit)
 
     def delta(self, *, generation: str, cursor: int, offset: int, limit: int):
         data = self._changes.changes(generation=generation, cursor=cursor,

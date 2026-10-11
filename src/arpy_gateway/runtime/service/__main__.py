@@ -14,6 +14,7 @@ import signal
 
 from arpy_gateway.ipc.server import LocalReadOnlyServer
 from .fixture import FixtureRuntime
+from .runner import serve_runtime
 
 
 async def run(port: int, *, period: float = 0.05):
@@ -21,7 +22,6 @@ async def run(port: int, *, period: float = 0.05):
     if len(token) < 32:
         raise ValueError("No IPC test credential supplied; refusing unsecured runtime")
     runtime = FixtureRuntime(period=period)
-    server = LocalReadOnlyServer(runtime, token=token)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -29,18 +29,13 @@ async def run(port: int, *, period: float = 0.05):
             loop.add_signal_handler(sig, stop.set)
         except (NotImplementedError, RuntimeError):
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stop.set))
-    try:
-        await runtime.start()
-        port = await server.start(port)
-        # Ready only after a headless loop actually runs; stdout is used by
-        # test harness, NOT by the future user-facing Studio.
-        print(json.dumps({"event": "ARPY_FIXTURE_READY",
-                          "port": port, "source": "DETERMINISTIC_FIXTURE_ONLY"}),
-              flush=True)
-        await stop.wait()
-    finally:
-        await server.stop()
-        await runtime.stop()
+
+    await serve_runtime(runtime, token=token, stop=stop, port=port,
+                        ready=lambda actual_port: print(json.dumps({
+                            "event": "ARPY_FIXTURE_READY",
+                            "port": actual_port,
+                            "source": "DETERMINISTIC_FIXTURE_ONLY",
+                        }), flush=True))
 
 
 def main(argv=None):
