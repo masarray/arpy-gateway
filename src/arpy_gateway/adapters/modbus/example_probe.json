@@ -1,0 +1,48 @@
+{
+  "instance": {
+    "id": "mb-client-1",
+    "name": "Modbus TCP Master",
+    "protocol": "modbus_tcp",
+    "enabled": true,
+    "settings": {}
+  },
+  "devices": [
+    {
+      "id": "meter-01",
+      "name": "Meter 01",
+      "unit_id": 1,
+      "host": "127.0.0.1",
+      "port": 1502,
+      "poll_ms": 1000,
+      "timeout_ms": 900
+    }
+  ],
+  "signals": [
+    {
+      "id": "meter01-voltage",
+      "name": "Meter 01 Voltage",
+      "value_type": "float32",
+      "unit": "V",
+      "parameters": {
+        "device_id": "meter-01",
+        "register_table": "holding",
+        "native_address": 0,
+        "byte_order": "big",
+        "word_order": "big",
+        "scale": 1.0
+      }
+    },
+    {
+      "id": "meter01-current",
+      "name": "Meter 01 Current",
+      "value_type": "uint16",
+      "unit": "A",
+      "parameters": {
+        "device_id": "meter-01",
+        "register_table": "holding",
+        "native_address": 2,
+        "scale": 0.1
+      }
+    }
+  ]
+}
