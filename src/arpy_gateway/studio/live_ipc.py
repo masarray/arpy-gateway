@@ -144,7 +144,7 @@ class LiveRuntimePanel(QWidget):
         layout.addLayout(toolbar)
 
         self.info = QLabel(
-            "Read-only global runtime signals. Not filtered by the offline engineering explorer; "
+            "Global runtime signals · read-only. Not filtered by the offline engineering explorer; "
             "Device/Signal identity binding requires Store #3 and RFC #13."
         )
         self.info.setWordWrap(True)
