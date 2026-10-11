@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from arpy_gateway.domain.models import (InstanceRole, ProtocolInstance, ProtocolSignal,
-                                         SignalSample, Quality, SignalDirection)
+                                         SignalSample, Quality, SignalDirection, SignalFamily)
 from arpy_gateway.runtime.ports import ProtocolAdapter
 from .configuration import TABLE_TO_FC, ParsedSignal, WIDTH, integer
 
@@ -63,6 +63,8 @@ class ModbusTcpServerAdapter(ProtocolAdapter):
                 continue
             if sig.direction not in (SignalDirection.OUTBOUND, SignalDirection.BIDIRECTIONAL):
                 raise ValueError("Server telemetry signal must be publishable")
+            if sig.family is SignalFamily.COMMAND:
+                raise ValueError("Physical command signals cannot use read-only telemetry server")
             p = sig.parameters
             table = p.get("register_table", "")
             if table not in TABLE_TO_FC:

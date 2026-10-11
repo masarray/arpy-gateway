@@ -199,17 +199,19 @@ class ModbusClientAdapter(ProtocolAdapter):
                 # library timeout and outer deadline prevent indefinite socket stalls
                 raw = await asyncio.wait_for(client.read(req, device.unit_id),
                                              timeout=device.timeout_ms/1000 + 0.25)
+                invalid_count = 0
                 for point in req.points:
                     try:
                         offset = point.address - req.address
                         value = decode_value(point, raw[offset:offset+point.width])
                     except (ValueError, OverflowError, TypeError):
                         self._sample(point, None, Quality.INVALID)
-                        self._status(device, DeviceState.DEGRADED, errors=1,
-                                     message="DECODE_INVALID")
+                        invalid_count += 1
                     else:
                         self._sample(point, value, Quality.GOOD)
-                self._status(device, DeviceState.ONLINE, ok=1)
+                self._status(device, DeviceState.DEGRADED if invalid_count else DeviceState.ONLINE,
+                             ok=1, errors=invalid_count,
+                             message="DECODE_INVALID" if invalid_count else "")
             except ModbusReadError:
                 for point in req.points:
                     self._sample(point, None, Quality.INVALID)
