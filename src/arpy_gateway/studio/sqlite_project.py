@@ -168,6 +168,19 @@ class SQLiteEngineeringProject:
         }).mappings
         return {"generation":generation, "rows":items, "has_more":has_more}
 
+    def save_instance(self, instance: ProtocolInstance, *,
+                      expected_generation: int):
+        """One authoritative SQLite edit for instance name/status/settings."""
+        if not instance.name.strip():
+            raise ValueError("Protocol instance name cannot be empty")
+        with self._store() as store:
+            generation = store.apply_v2(
+                self.project_id, expected_generation=expected_generation,
+                instances=(instance,), actor="studio",
+                reason="Save Protocol Instance draft",
+            )
+        return {"generation": generation, "id": instance.id}
+
     def save_tcp_device(self, details: TCPDeviceEdit, *,
                         expected_generation:int, original=None):
         return self.devices.save(details,expected_generation=expected_generation,
