@@ -33,7 +33,9 @@ def main(argv=None):
         port = int(port_text)
         if 1 <= port <= 65535:
             endpoint = (port, token)
-    win = StudioV2Window(demo, runtime_endpoint=endpoint)
+    from .persisted_devices import default_engineering_database
+    win = StudioV2Window(demo, runtime_endpoint=endpoint,
+                         engineering_db_path=default_engineering_database())
     win.show()
     if opts.screenshot:
         def capture():
