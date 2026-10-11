@@ -267,6 +267,8 @@ class SavedDevicesPanel(QWidget):
         self.model = DevicesModel(self)
         self.table = QTableView(self)
         self.table.setModel(self.model)
+        self.table.selectionModel().currentChanged.connect(
+            lambda *_: self._sync_buttons())
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setAlternatingRowColors(True)
@@ -305,9 +307,11 @@ class SavedDevicesPanel(QWidget):
 
         def failure(message):
             self._busy = False
-            self.status.setText("STORAGE ERROR · No changes deployed")
-            # A traceback may contain private paths and fields; do not show it.
-            self.notify("Engineering database operation failed; inspect diagnostic logs")
+            # The first line is the domain exception, not the worker traceback.
+            # A stale generation, migration gate or missing signals is an
+            # actionable configuration condition, never an active Deploy.
+            first_line = str(message).splitlines()[0][:180]
+            self.status.setText("NOT SAVED / NOT DEPLOYED · " + first_line)
             self._sync_buttons()
 
         if not self.hub.submit(work, success, write=True, error=failure):
