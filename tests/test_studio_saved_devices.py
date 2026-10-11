@@ -96,14 +96,19 @@ class PersistedDeviceRepositoryTests(unittest.TestCase):
     def test_existing_v1_file_never_auto_migrates(self):
         with EngineeringStore(self.path) as store:
             store.create_project("previous-v1")
-        with sqlite3.connect(self.path) as db:
+        db=sqlite3.connect(self.path)
+        try:
             version_before=db.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            db.close()  # sqlite3 context managers do not close connections.
         self.assertEqual(version_before,1)
         with self.assertRaisesRegex(RuntimeError,"backup and migration"):
             self.repo.prepare()
-        with sqlite3.connect(self.path) as db:
+        db=sqlite3.connect(self.path)
+        try:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],1)
-        self.assertEqual(self.repo.page if False else version_before,1)
+        finally:
+            db.close()  # Critical on Windows, otherwise TemporaryDirectory fails.
 
     def test_platform_resolves_local_data_directory_without_commands(self):
         loc=default_engineering_database()
