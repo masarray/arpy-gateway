@@ -47,6 +47,7 @@ class AdapterRuntime:
         self._ignored = 0
         self._started: datetime | None = None
         self._error: str | None = None
+        self._failure_at: datetime | None = None
 
     async def start(self):
         if self._state != "UNCONFIGURED":
@@ -87,15 +88,12 @@ class AdapterRuntime:
             self._mark_link_failed("SAMPLE_STREAM_" + type(exc).__name__.upper())
 
     def _mark_link_failed(self, reason: str):
+        # O(1) transition even with 500k signals. Page projection derives
+        # invalid quality lazily rather than rewriting half a million samples.
         self._state = "DEGRADED"
         self._error = reason
-        now = datetime.now(timezone.utc)
-        for sid, old in tuple(self._latest.items()):
-            self._latest[sid] = SignalSample(
-                sid, None, Quality.COMMUNICATION_LOST, old.origin,
-                now, old.sequence + 1,
-                source_timestamp=old.source_timestamp)
-        # Values without an initial sample remain unavailable, not zero/Good.
+        self._failure_at = datetime.now(timezone.utc)
+        # Unseen samples remain unavailable; no invented zero or fresh Good.
 
     async def stop(self):
         self._state = "STOPPING"
@@ -132,13 +130,16 @@ class AdapterRuntime:
         rows = []
         for sid in self._ids[offset:offset + limit]:
             sample = self._latest.get(sid)
+            failed = self._state == "DEGRADED" and sample is not None
             rows.append({
                 "signal_id": sid,
-                "value": sample.value if sample else None,
-                "quality": sample.quality.value if sample else "unavailable",
+                "value": None if failed else sample.value if sample else None,
+                "quality": ("communication_lost" if failed else
+                            sample.quality.value if sample else "unavailable"),
                 "origin": sample.origin.value if sample else None,
-                "sequence": sample.sequence if sample else 0,
-                "observed_at": sample.observed_at.isoformat() if sample else None,
+                "sequence": sample.sequence + 1 if failed else sample.sequence if sample else 0,
+                "observed_at": (self._failure_at.isoformat() if failed else
+                                sample.observed_at.isoformat() if sample else None),
                 "source_timestamp": sample.source_timestamp.isoformat()
                                     if sample and sample.source_timestamp else None,
             })
