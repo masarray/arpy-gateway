@@ -97,6 +97,41 @@ jobs:
           QTimer.singleShot(1200, capture)
           raise SystemExit(app.exec())
           PY
+      - name: Capture sliding source Signal Catalog with real selected row
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QTimer
+          from PySide6.QtWidgets import QApplication
+          from arpy_gateway.studio.v2_window import StudioV2Window
+          app = QApplication([])
+          win = StudioV2Window()
+          win.resize(1560, 860)
+          win.show()
+          win.navigation.setCurrentRow(2)
+          win.tree.setCurrentIndex(win.tree_model.find('scada104:ca:1'))
+          win.signals.assign_button.click()
+          catalog = win.catalog_drawer
+          catalog.connection.setCurrentIndex(catalog.connection.findData('meter01:ied:2'))
+          catalog.search.setText('addr:1000')
+          catalog.refresh_search()
+          def check():
+              if catalog.model.rowCount() != 1 or 0 not in catalog.model._pages:
+                  QTimer.singleShot(150, check)
+                  return
+              catalog.table.selectRow(0)
+              def capture():
+                  root = Path('artifacts')
+                  root.mkdir(parents=True, exist_ok=True)
+                  ok = win.grab().save(str(root / 'arpy-v2-slide-in-catalog-selected.png'))
+                  app.exit(0 if ok else 2)
+              QTimer.singleShot(400, capture)
+          QTimer.singleShot(1000, check)
+          QTimer.singleShot(20000, lambda: app.exit(4))
+          raise SystemExit(app.exec())
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
