@@ -98,6 +98,18 @@ class AdapterBridgeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
+    async def test_partial_adapter_start_failure_still_closes_resources(self):
+        class HalfStarted(FakePort):
+            async def start(self, instance, signals):
+                self.started = True
+                raise OSError("port busy after open")
+        fake = HalfStarted()
+        runtime = AdapterRuntime(make_instance(), (signal("a"),), fake)
+        with self.assertRaisesRegex(OSError, "port busy"):
+            await runtime.start()
+        self.assertTrue(fake.stopped)
+        self.assertEqual(runtime.health()["state"], "FAILED_TO_START")
+
     async def test_reject_wrong_family_and_duplicate_ids_before_connect(self):
         wrong = FakePort()
         class Bad(FakePort):

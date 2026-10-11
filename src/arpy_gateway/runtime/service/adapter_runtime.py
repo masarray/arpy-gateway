@@ -57,8 +57,13 @@ class AdapterRuntime:
             await self._adapter.start(self._instance, self._signals)
         except Exception:
             self._state = "FAILED_TO_START"
-            # Propagate so package/deployment errors are not turned into
-            # infinite retries or falsely reported as a connected device.
+            # Partial transport initialization may already own a socket/COM
+            # handle. Run bounded cleanup while preserving original failure.
+            try:
+                await asyncio.wait_for(self._adapter.stop(), 5.0)
+            except Exception:
+                pass
+            # Propagate so packaging/deployment errors do not retry forever.
             raise
         self._state = "RUNNING"
         self._started = datetime.now(timezone.utc)
