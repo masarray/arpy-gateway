@@ -37,6 +37,19 @@ arpy-gatewayd       LocalReadOnlyServer
 - IPC `devices.page(offset,limit)` is available when runtime supports it, with a strict 128-row bound. Returns stable **Device ID**, state, reads_ok/read_errors/reconnects, last sanitized reason and last real RX UTC. Does **not** treat TCP peer IP or Modbus Unit ID as a stable record key. `health` reports dropped monitoring notifications; `signals.page` / `signals.delta` are retained for live values/quality/timestamps.
 - The IPC channel is a **loss-tolerant Value Viewer projection**, not a protocol event-delivery bus. TCP/RTU socket ownership and polling remain entirely within the headless engine, never PySide6.
 
+## Multi-instance fleet supervisor
+
+`RuntimeFleet` combines **1–64 independent, injected `AdapterRuntime` instances** into one read-only IPC endpoint. The fleet does not reassign Modbus addresses, change device owners, or become a scheduler; each TCP peer group/RTU bus continues to own its own socket and retry policy.
+
+- Precomputes a compact prefix-offset index for up to **500,000 configured signal IDs** across instances. `signals.page(offset,limit)` uses binary search + bounded slices, not materialization of every signal/Qt widget.
+- Accepted child sample changes feed one bounded fleet `ViewportChanges` monitor ring. Client subscriptions receive coalesced **latest values** only; global link quality loss invalidates old cursor in O(1) and requires snapshot resync, without iterating all 500k signal values.
+- `health` contains bounded per-instance status/error counters. `devices.page` exposes stable IED/slave IDs, including `instance_id` so identical display names/Unit IDs cannot accidentally be conflated across different serial/TCP buses.
+- Independent startup via per-instance timeouts: one failed bus reports **DEGRADED** while other healthy instances continue polling; if all fail to initialize, the caller receives a startup failure rather than a false healthy service.
+- Cancellation during partial adapter startup triggers bounded resource cleanup; shutdown tears down each instance independently and surfaces any cleanup failures.
+- **This is monitoring and lifecycle orchestration only**, not high availability/redundancy, transactional Deploy, protocol-output event queues, or automatic packet failover.
+
+New `tests/ipc/test_runtime_fleet.py` covers mixed TCP/RTU supervisor identity, cross-instance virtual pagination/delta, per-device status, a failed instance being isolated, and quality invalidation on unexpected stream loss. The test uses protocol-port fakes; separately, `test_modbus_runtime_integration.py` proves the real TCP wire path through one service instance.
+
 ## Tested operational behavior
 
 - A separate real TCP slave responds with Modbus MBAP/PDU frames for FC03 (IEEE Float32 = 123.0) and FC01 (coil true); independent PyModbus client reads via the ARPY transport adapter, publishes typed samples through `AdapterRuntime`, then IPC returns **Good / actual value / timestamp**.
