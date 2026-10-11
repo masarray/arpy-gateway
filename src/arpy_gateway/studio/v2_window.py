@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QModelIndex, QAbstractTableModel, Signal, QTimer
 from PySide6.QtWidgets import (
     QApplication, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QListWidget, QMainWindow, QMessageBox, QPushButton, QSpinBox,
+    QLineEdit, QTabBar, QMainWindow, QMessageBox, QPushButton, QSpinBox,
     QSplitter, QStackedWidget, QTableView, QTreeView, QVBoxLayout, QWidget,
     QHeaderView
 )
@@ -24,6 +24,7 @@ from .telemetry_view import TelemetrySource, ReadOnlySignalModel
 from .runtime_view import DisconnectedRuntime
 from .workers import WorkerHub
 from .window import GatewayPage, VirtualMappings
+from .catalog_drawer import SignalCatalogDrawer
 
 
 def title(text, subtitle):
@@ -291,88 +292,8 @@ class ProtocolConfigWorkspace(QWidget):
                         write=True, error=self.notify)
 
 
-class AssignCatalogDialog(QDialog):
-    def __init__(self, project, destination_id, station_id, parent=None):
-        super().__init__(parent)
-        self.project = project
-        self.destination_id, self.station_id = destination_id, station_id
-        self.setWindowTitle("Assign Signals from Source Catalog")
-        self.setMinimumWidth(420)
-        f = QFormLayout(self)
-        self.source = QComboBox()
-        for inst in project.instances():
-            if inst.id != destination_id and inst.role.value == "client":
-                self.source.addItem(inst.name, inst.id)
-        self.connection = QComboBox()
-        self.source.currentIndexChanged.connect(self._load_connections)
-        self.source_index = QSpinBox()
-        self.source_index.setRange(1, 500_000)
-        self.source_index.setValue(1)
-        self.count = QSpinBox()
-        self.count.setRange(1, 2000)
-        self.count.setValue(10)
-        self.ioa = QSpinBox()
-        self.ioa.setRange(0, 16777215)
-        self.ioa.setValue(1001)
-        self.ti = QComboBox()
-        for desc, value in (
-            ("TI 13 · Short float measurement", 13),
-            ("TI 35 · Time-tagged scaled", 35),
-            ("TI 11 · Scaled measurement", 11),
-            ("TI 1 · Single indication", 1),
-            ("TI 3 · Double indication", 3)):
-            self.ti.addItem(desc, value)
-        for label, widget in (("Source protocol", self.source),
-                              ("IED / connection", self.connection),
-                              ("First source signal #", self.source_index),
-                              ("Number of signals", self.count),
-                              ("Start IEC-104 IOA", self.ioa),
-                              ("Destination TI", self.ti)):
-            f.addRow(label, widget)
-        self.preview = QLabel("Creates new destination signal IDs and separate mapping edges.")
-        self.preview.setObjectName("FieldHint")
-        self.preview.setWordWrap(True)
-        f.addRow(self.preview)
-        controls = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
-                                    QDialogButtonBox.StandardButton.Cancel)
-        controls.accepted.connect(self._accept)
-        controls.rejected.connect(self.reject)
-        f.addRow(controls)
-        self._load_connections()
-
-    def _load_connections(self):
-        self.connection.clear()
-        iid = self.source.currentData()
-        if not iid:
-            return
-        self.connection.addItem("All source signals", "")
-        for point in self.project.points(iid):
-            if point.kind != "allowed_master":
-                self.connection.addItem(point.name, point.id)
-
-    def _accept(self):
-        if not self.source.currentData() or self.ioa.value() + self.count.value() - 1 > 16777215:
-            QMessageBox.warning(self, "Assignment", "Invalid source or IOA range")
-            return
-        if self.source_index.value() - 1 + self.count.value() > self.project.source(
-                self.source.currentData(), self.connection.currentData()).row_count():
-            QMessageBox.warning(self, "Assignment", "Selected IED does not contain this many signals")
-            return
-        accepted = QMessageBox.question(
-            self, "Confirm catalog assignment",
-            f"Create {self.count.value():,} IEC-104 destination signals, auto-increment IOAs "
-            f"from {self.ioa.value()} and link to source catalog?\n"
-            "This changes only the OFFLINE session draft. No runtime delivery.")
-        if accepted == QMessageBox.StandardButton.Yes:
-            self.accept()
-
-    def parameters(self):
-        return (self.source.currentData(), self.connection.currentData(),
-                self.source_index.value()-1, self.destination_id, self.station_id,
-                self.ioa.value(), self.count.value(), self.ti.currentData())
-
-
 class SignalWorkspace(QWidget):
+    catalog_requested = Signal(str, str)
     def __init__(self, project, hub, notify, assignments_changed, parent=None):
         super().__init__(parent)
         self.project, self.hub, self.notify = project, hub, notify
@@ -445,23 +366,14 @@ class SignalWorkspace(QWidget):
                         done, write=True, error=self.notify)
 
     def assign_catalog(self):
-        iid = self.instance_id
-        candidates = self.project.stations(iid)
-        if not candidates:
-            self.notify("First configure an IEC-104 ASDU data station")
+        instance = self.instance_id
+        stations = self.project.stations(instance)
+        if not stations:
+            self.notify("Configure an IEC-104 ASDU station before assignment")
             return
-        station_id = self.scope_id if self.scope_id in {s.id for s in candidates} else candidates[0].id
-        dialog = AssignCatalogDialog(self.project, iid, station_id, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        args = dialog.parameters()
-        def completed(ids):
-            self.model.reload(search="")
-            self.search.clear()
-            self.assignments_changed()
-            self.notify(f"Created {len(ids)} destination signals and mappings · OFFLINE draft")
-        self.hub.submit(lambda: self.project.assign_catalog(*args), completed,
-                        write=True, error=self.notify)
+        station_id = (self.scope_id if self.scope_id in {s.id for s in stations}
+                      else stations[0].id)
+        self.catalog_requested.emit(instance, station_id)
 
     def focus(self, signal_id):
         index = int(signal_id.rsplit(":", 1)[-1])
@@ -606,6 +518,15 @@ class LiveWorkspace(QWidget):
         self.notify("Copied redacted offline diagnostic summary")
 
 
+class WorkspaceTabs(QTabBar):
+    """Compact native Qt tabs preserve old navigation test APIs."""
+    def currentRow(self):
+        return self.currentIndex()
+
+    def setCurrentRow(self, row):
+        self.setCurrentIndex(row)
+
+
 class StudioV2Window(QMainWindow):
     WORKSPACES = ("Gateway Config", "Protocol Config", "Protocol Signals",
                   "Protocol Mapping", "Protocol Monitoring", "Value Simulation")
@@ -622,41 +543,56 @@ class StudioV2Window(QMainWindow):
         apply_theme(QApplication.instance(), "light")
 
     def _build(self):
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        sidebar = QWidget()
-        sidebar.setObjectName("Sidebar")
-        s = QVBoxLayout(sidebar)
-        s.setContentsMargins(11, 14, 10, 9)
-        brand = QLabel("ARPY / GATEWAY")
+        # Horizontal navigation replaces the wasteful fixed-width left sidebar.
+        central = QWidget(self)
+        frame = QVBoxLayout(central)
+        frame.setContentsMargins(0, 0, 0, 0)
+        frame.setSpacing(0)
+        header = QFrame()
+        header.setObjectName("AppHeader")
+        top = QHBoxLayout(header)
+        top.setContentsMargins(12, 6, 12, 6)
+        top.setSpacing(9)
+        brand = QLabel("ARPY")
         brand.setObjectName("Brand")
-        s.addWidget(brand)
-        subtitle = QLabel("ENGINEERING STUDIO")
-        subtitle.setObjectName("Muted")
-        s.addWidget(subtitle)
-        s.addSpacing(12)
-        self.navigation = QListWidget()
-        self.navigation.addItems(self.WORKSPACES)
-        s.addWidget(self.navigation, 1)
-        self.back_button = action("← Back to Mapping", self.go_back)
+        brand.setToolTip("ARPY Gateway Engineering Studio")
+        top.addWidget(brand)
+        self.navigation = WorkspaceTabs()
+        self.navigation.setObjectName("WorkspaceTabs")
+        self.navigation.setDrawBase(False)
+        self.navigation.setExpanding(False)
+        for label in self.WORKSPACES:
+            self.navigation.addTab(label)
+        top.addWidget(self.navigation, 1)
+        self.back_button = action("← Back", self.go_back)
         self.back_button.setEnabled(False)
-        s.addWidget(self.back_button)
-        s.addWidget(QLabel("Theme"))
+        top.addWidget(self.back_button)
         self.theme = QComboBox()
         self.theme.addItem("Light", "light")
         self.theme.addItem("Dark", "dark")
+        self.theme.setMaximumWidth(86)
         self.theme.currentIndexChanged.connect(
             lambda _: apply_theme(QApplication.instance(), self.theme.currentData()))
-        s.addWidget(self.theme)
-        splitter.addWidget(sidebar)
+        top.addWidget(self.theme)
+        draft = QLabel("OFFLINE DRAFT")
+        draft.setObjectName("StatusWarning")
+        top.addWidget(draft)
+        frame.addWidget(header)
 
+        horizontal = QWidget()
+        line = QHBoxLayout(horizontal)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(0)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         explorer_pane = QWidget()
         explorer_pane.setObjectName("ExplorerPanel")
-        e = QVBoxLayout(explorer_pane)
-        e.setContentsMargins(7, 11, 7, 9)
-        e.addWidget(QLabel("PROTOCOL EXPLORER"))
+        explorer = QVBoxLayout(explorer_pane)
+        explorer.setContentsMargins(8, 10, 8, 7)
+        explorer.setSpacing(6)
+        explorer.addWidget(QLabel("PROTOCOL EXPLORER"))
         self.disabled_toggle = QCheckBox("Show disabled")
         self.disabled_toggle.toggled.connect(self.refresh_explorer)
-        e.addWidget(self.disabled_toggle)
+        explorer.addWidget(self.disabled_toggle)
         self.tree_model = ProtocolExplorer(self.project)
         self.tree = QTreeView()
         self.tree.setModel(self.tree_model)
@@ -664,36 +600,69 @@ class StudioV2Window(QMainWindow):
         self.tree.setUniformRowHeights(True)
         self.tree.setExpandsOnDoubleClick(True)
         self.tree.selectionModel().currentChanged.connect(self._selection_changed)
-        e.addWidget(self.tree, 1)
+        explorer.addWidget(self.tree, 1)
         splitter.addWidget(explorer_pane)
 
         self.pages = QStackedWidget()
         self.gateway = GatewayPage(self.project.demo, self.hub, self.notify)
-        self.config = ProtocolConfigWorkspace(self.project, self.hub, self.notify, self.refresh_explorer)
-        self.signals = SignalWorkspace(self.project, self.hub, self.notify, self.on_mappings_changed)
+        self.config = ProtocolConfigWorkspace(self.project, self.hub, self.notify,
+                                              self.refresh_explorer)
+        self.signals = SignalWorkspace(self.project, self.hub, self.notify,
+                                       self.on_mappings_changed)
         self.mapping = MappingWorkspace(self.project, self.hub, self.notify)
         self.monitor = LiveWorkspace(self.project, self.hub, self.notify, self.runtime)
-        self.simulation = LiveWorkspace(self.project, self.hub, self.notify, self.runtime, simulation=True)
+        self.simulation = LiveWorkspace(self.project, self.hub, self.notify,
+                                        self.runtime, simulation=True)
         for widget in (self.gateway, self.config, self.signals, self.mapping,
                        self.monitor, self.simulation):
             self.pages.addWidget(widget)
         splitter.addWidget(self.pages)
         splitter.setChildrenCollapsible(False)
-        splitter.setSizes([SIDEBAR_WIDTH, EXPLORER_WIDTH, 1000])
-        self.setCentralWidget(splitter)
-        self.navigation.currentRowChanged.connect(self._workspace_changed)
-        self.gateway.changed.connect(lambda: self.refresh_explorer())
+        splitter.setSizes([232, 1190])
+        line.addWidget(splitter, 1)
+        self.catalog_drawer = SignalCatalogDrawer(self.project, self.hub, self.notify)
+        line.addWidget(self.catalog_drawer, 0)
+        frame.addWidget(horizontal, 1)
+        self.setCentralWidget(central)
+
+        self.navigation.currentChanged.connect(self._workspace_changed)
+        self.gateway.changed.connect(self.refresh_explorer)
         self.mapping.navigate_signal.connect(self.open_signal)
+        self.signals.catalog_requested.connect(self.open_catalog)
+        self.catalog_drawer.close_requested.connect(self.close_catalog)
+        self.catalog_drawer.assigned.connect(self._catalog_assigned)
         self.hub.error.connect(self.notify)
-        self.navigation.setCurrentRow(0)
+        self._workspace_changed(0)
         self.statusBar().showMessage(
             "Offline engineering demo  •  Draft only  •  No gateway runtime connected", 0)
+
+    def open_catalog(self, destination_id: str, station_id: str):
+        # The source browser is a NON-MODAL right panel. Engineers retain
+        # visual context in Protocol Signals while selecting real source rows.
+        try:
+            self.catalog_drawer.set_destination(destination_id, station_id)
+        except ValueError as exc:
+            self.notify(str(exc))
+            return
+        width = min(600, max(470, int(self.width() * 0.42)))
+        self.catalog_drawer.slide(True, width)
+
+    def close_catalog(self):
+        self.catalog_drawer.slide(False)
+
+    def _catalog_assigned(self, created):
+        self.signals.search.clear()
+        self.signals.model.reload(search="")
+        self.on_mappings_changed()
+        self.close_catalog()
 
     def _workspace_changed(self, workspace):
         if workspace < 0:
             return
         self.context.workspace = workspace
         self.pages.setCurrentIndex(workspace)
+        if workspace != 2 and self.catalog_drawer.maximumWidth() > 0:
+            self.close_catalog()
         self.refresh_explorer()
 
     def refresh_explorer(self, key=None):
