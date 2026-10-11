@@ -451,24 +451,28 @@ class LiveWorkspace(QWidget):
         if not simulation:
             toolbar.addWidget(action("Copy Diagnostics", self.copy_diagnostics))
         lay.addLayout(toolbar)
-        self.provider = TelemetrySource(project.source(self.instance_id), simulation=simulation)
-        self.model = ReadOnlySignalModel(self.provider, hub, self.instance_id, self)
-        self.grid = QTableView()
-        self.grid.setModel(self.model)
-        self.grid.setAlternatingRowColors(True)
-        self.grid.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
-        self.grid.horizontalHeader().setStretchLastSection(True)
-        self.grid.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        lay.addWidget(self.grid, 1)
-        self.model.failure.connect(notify)
-        # Optional read-only live endpoint. The offline engineering grid is not
-        # falsely joined by row position to runtime signal identities.
+        # Exactly one data model per mode: do not construct a hidden 500k-row
+        # offline TelemetrySource when actual runtime IPC monitoring is active.
         self.live_panel = (LiveRuntimePanel(hub, runtime_endpoint, self)
                            if runtime_endpoint is not None and not simulation else None)
+        self.provider = None
+        self.model = None
+        self.grid = None
         if self.live_panel is not None:
-            self.grid.hide()
-            lay.addWidget(self.live_panel, 2)
-            self.status.setText("TEST RUNTIME · ATTACHING")
+            lay.addWidget(self.live_panel, 1)
+            self.status.setText("TEST IPC · READ ONLY")
+        else:
+            self.provider = TelemetrySource(project.source(self.instance_id),
+                                            simulation=simulation)
+            self.model = ReadOnlySignalModel(self.provider, hub, self.instance_id, self)
+            self.grid = QTableView()
+            self.grid.setModel(self.model)
+            self.grid.setAlternatingRowColors(True)
+            self.grid.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
+            self.grid.horizontalHeader().setStretchLastSection(True)
+            self.grid.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            lay.addWidget(self.grid, 1)
+            self.model.failure.connect(notify)
         if simulation:
             b = QHBoxLayout()
             b.addWidget(QLabel("Selected signal · proposed value"))
@@ -486,7 +490,11 @@ class LiveWorkspace(QWidget):
             lay.addLayout(b)
             self.caption = QLabel("No values transmitted. Real source remains unaffected; field controls blocked.")
         else:
-            self.caption = QLabel("No runtime connection · unavailable does NOT mean value zero or quality Good.")
+            self.caption = QLabel(
+                "Test IPC client · live values only from the connected headless runtime. "
+                "No configuration deployment or field controls."
+                if self.live_panel is not None else
+                "No runtime connection · unavailable does NOT mean value zero or quality Good.")
         self.caption.setObjectName("Muted")
         lay.addWidget(self.caption)
 
