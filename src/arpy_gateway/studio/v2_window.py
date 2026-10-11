@@ -23,6 +23,7 @@ from .grid import VirtualSignals, SignalGrid, PAGE
 from .telemetry_view import TelemetrySource, ReadOnlySignalModel
 from .runtime_view import DisconnectedRuntime
 from .live_ipc import LiveRuntimePanel
+from .persisted_devices import SavedDevicesPanel
 from .workers import WorkerHub
 from .window import GatewayPage, VirtualMappings
 from .catalog_drawer import SignalCatalogDrawer
@@ -154,7 +155,8 @@ class StationsModel(QAbstractTableModel):
 
 
 class ProtocolConfigWorkspace(QWidget):
-    def __init__(self, project, hub, notify, topology_changed, parent=None):
+    def __init__(self, project, hub, notify, topology_changed, parent=None,
+                 engineering_db_path=None):
         super().__init__(parent)
         self.project, self.hub, self.notify = project, hub, notify
         self.topology_changed = topology_changed
@@ -165,6 +167,14 @@ class ProtocolConfigWorkspace(QWidget):
         self.breadcrumb = QLabel("Select a protocol from the explorer")
         self.breadcrumb.setObjectName("SectionTitle")
         lay.addWidget(self.breadcrumb)
+        if engineering_db_path is not None:
+            self.saved_devices_button = action(
+                "Saved Modbus Devices (SQLite)", self.show_saved_devices, True)
+            self.saved_devices_button.setToolTip(
+                "Persistent engineering draft, independent of demonstration catalog")
+            lay.addWidget(self.saved_devices_button)
+        else:
+            self.saved_devices_button = None
         self.stack = QStackedWidget()
         lay.addWidget(self.stack, 1)
 
@@ -220,6 +230,19 @@ class ProtocolConfigWorkspace(QWidget):
         self.station_grid.setColumnWidth(1, 180)
         sv.addWidget(self.station_grid)
         self.stack.addWidget(stations)
+
+        self.saved_devices = (SavedDevicesPanel(hub, engineering_db_path,
+                                               notify, self)
+                              if engineering_db_path is not None else None)
+        if self.saved_devices is not None:
+            self.stack.addWidget(self.saved_devices)
+
+    def show_saved_devices(self):
+        if self.saved_devices is None:
+            return
+        self.breadcrumb.setText("Saved Modbus TCP Devices / SQLite v2 Engineering Draft")
+        self.stack.setCurrentWidget(self.saved_devices)
+        self.saved_devices.activate()
 
     def select_node(self, node):
         self.current = node
@@ -560,12 +583,14 @@ class WorkspaceTabs(QTabBar):
 class StudioV2Window(QMainWindow):
     WORKSPACES = ("Gateway Config", "Protocol Config", "Protocol Signals",
                   "Protocol Mapping", "Protocol Monitoring", "Value Simulation")
-    def __init__(self, demo=None, parent=None, *, runtime_endpoint=None):
+    def __init__(self, demo=None, parent=None, *, runtime_endpoint=None,
+                 engineering_db_path=None):
         super().__init__(parent)
         self.project = EngineeringView(demo or DemoProvider())
         self.hub = WorkerHub(self)
         self.runtime = DisconnectedRuntime(self.project.demo)
         self.runtime_endpoint = runtime_endpoint  # developer-only test endpoint
+        self.engineering_db_path = engineering_db_path  # persistent local draft, not Deploy
         self.context = SelectionContext()
         self.setWindowTitle("ARPY Gateway Studio · Protocol Engineering Preview")
         self.resize(1450, 850)
@@ -636,8 +661,9 @@ class StudioV2Window(QMainWindow):
 
         self.pages = QStackedWidget()
         self.gateway = GatewayPage(self.project.demo, self.hub, self.notify)
-        self.config = ProtocolConfigWorkspace(self.project, self.hub, self.notify,
-                                              self.refresh_explorer)
+        self.config = ProtocolConfigWorkspace(
+            self.project, self.hub, self.notify, self.refresh_explorer,
+            engineering_db_path=self.engineering_db_path)
         self.signals = SignalWorkspace(self.project, self.hub, self.notify,
                                        self.on_mappings_changed)
         self.mapping = MappingWorkspace(self.project, self.hub, self.notify)
