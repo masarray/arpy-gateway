@@ -10,6 +10,7 @@ on:
       - 'tests/test_studio_v2.py'
       - 'tests/test_studio_live_ipc.py'
       - 'tests/test_studio_modbus_ipc.py'
+      - 'tests/test_studio_saved_devices.py'
       - '.github/workflows/gui-studio.yml'
       - 'pyproject.toml'
   workflow_dispatch:
@@ -19,6 +20,8 @@ permissions:
 
 jobs:
   linux-gui-tests:
+    # Requested Windows-first delivery; Linux full QA only on manual final gate.
+    if: github.event_name == 'workflow_dispatch'
     name: Linux Qt / contracts / virtual 500k smoke
     runs-on: ubuntu-latest
     steps:
@@ -163,9 +166,49 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  windows-gui-tests:
+    name: Windows GUI + real SQLite Device Save/Reopen / Python 3.12
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CI test dependencies
+        run: python -m pip install -e ".[studio]" "pymodbus[serial]==3.15.0"
+      - name: Overlay pinned IPC and Modbus protocol test sources, CI only
+        shell: bash
+        run: |
+          git fetch --no-tags origin feat/8-modbus-runtime-integration
+          test "$(git rev-parse FETCH_HEAD)" = "eb926024751bebdf728c6174869a4d31fdcca762"
+          git checkout FETCH_HEAD -- src/arpy_gateway/ipc src/arpy_gateway/runtime/service
+          git fetch --no-tags origin feat/6-modbus-async-engine
+          test "$(git rev-parse FETCH_HEAD)" = "cb94de62d49bdb3c3151f7cd472311911442f241"
+          git checkout FETCH_HEAD -- src/arpy_gateway/adapters/modbus
+      - name: Overlay pinned ARCH #22 and Store #21 (draft candidate, CI only)
+        shell: bash
+        run: |
+          git fetch --no-tags origin feat/arch13-device-station-v2
+          test "$(git rev-parse FETCH_HEAD)" = "17c4c764d6a41bc4d73bf62c79accbf4183ef3db"
+          git checkout FETCH_HEAD -- src/arpy_gateway/domain/v2.py src/arpy_gateway/domain/validation_v2.py src/arpy_gateway/contracts/project_v2.py
+          git fetch --no-tags origin feat/store-revisioned-sqlite-issue3
+          test "$(git rev-parse FETCH_HEAD)" = "8868f715f27b7eb36fd2740be24493576a27b306"
+          git checkout FETCH_HEAD -- src/arpy_gateway/engineering
+      - name: Compile Studio, Store and pinned protocol client
+        run: python -m compileall -q src tests/test_studio_saved_devices.py
+      - name: Qt regression including IPC/actual Modbus + Add/Edit/SQLite Reopen
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_studio*.py' -v
+      - name: Assert no OS gateway service started by Studio tests
+        run: python -c "from arpy_gateway.studio.persisted_devices import TCPDeviceRepository; print('SQLite Store isolated from gateway OS service')"
+
   windows-preview:
     name: Windows portable engineering-only EXE
-    needs: linux-gui-tests
+    needs: windows-gui-tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -184,12 +227,21 @@ jobs:
           git checkout "$pinned" -- src/arpy_gateway/ipc
       - name: Verify IPC viewer dependency
         run: python -c "from arpy_gateway.ipc.client import ViewportSession; print('IPC client import OK')"
-      - name: Build unsigned GUI-only application
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name ARPY-Gateway-Studio-Preview --paths src src/arpy_gateway/studio/launcher.py
+      - name: Overlay approved-for-preview SQLite/ARCH v2 candidate sources
+        shell: bash
+        run: |
+          git fetch --no-tags origin feat/arch13-device-station-v2
+          test "$(git rev-parse FETCH_HEAD)" = "17c4c764d6a41bc4d73bf62c79accbf4183ef3db"
+          git checkout FETCH_HEAD -- src/arpy_gateway/domain/v2.py src/arpy_gateway/domain/validation_v2.py src/arpy_gateway/contracts/project_v2.py
+          git fetch --no-tags origin feat/store-revisioned-sqlite-issue3
+          test "$(git rev-parse FETCH_HEAD)" = "8868f715f27b7eb36fd2740be24493576a27b306"
+          git checkout FETCH_HEAD -- src/arpy_gateway/engineering
+      - name: Build unsigned GUI engineering preview with bundled SQLite v2
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name ARPY-Gateway-Studio-Preview --paths src --hidden-import arpy_gateway.engineering.store_v2 --hidden-import arpy_gateway.domain.v2 --hidden-import arpy_gateway.domain.validation_v2 --hidden-import arpy_gateway.contracts.project_v2 src/arpy_gateway/studio/launcher.py
       - name: Upload Windows preview
         uses: actions/upload-artifact@v4
         with:
-          name: ARPY-Gateway-Studio-Issue4-Windows-Preview
+          name: ARPY-Gateway-Studio-Windows-Saved-Devices-Preview
           path: dist/ARPY-Gateway-Studio-Preview.exe
           if-no-files-found: error
           retention-days: 14
