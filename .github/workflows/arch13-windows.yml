@@ -1,0 +1,44 @@
+name: ARCH RFC13 Windows v2 Contract Gate
+
+on:
+  push:
+    branches: ['feat/arch13-*']
+  pull_request:
+    paths:
+      - 'src/arpy_gateway/domain/v2.py'
+      - 'src/arpy_gateway/domain/validation_v2.py'
+      - 'src/arpy_gateway/contracts/project_v2.py'
+      - 'contracts/project.v2.schema.json'
+      - 'tests/test_arch13_v2.py'
+      - '.github/workflows/arch13-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+jobs:
+  contract-windows:
+    name: RFC #13 Windows Python ${{ matrix.python }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10','3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile proposed v2 without Qt/Modbus
+        run: python -m compileall -q src/arpy_gateway/domain src/arpy_gateway/contracts tests/test_arch13_v2.py
+      - name: Run original v1 and proposed v2 contract tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_*contracts.py' -v
+      - name: Run RFC13 v2 identity, migration and ownership tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_arch13_v2.py' -v
+      - name: Verify no GUI/protocol runtime imports
+        env:
+          PYTHONPATH: src
+        run: python -c "import sys, arpy_gateway.domain.v2, arpy_gateway.domain.validation_v2, arpy_gateway.contracts.project_v2; assert not any(x.startswith(('PySide6','pymodbus','arpy_gateway.studio','arpy_gateway.adapters')) for x in sys.modules)"
