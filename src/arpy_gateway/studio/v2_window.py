@@ -22,6 +22,7 @@ from .explorer import ProtocolExplorer
 from .grid import VirtualSignals, SignalGrid, PAGE
 from .telemetry_view import TelemetrySource, ReadOnlySignalModel
 from .runtime_view import DisconnectedRuntime
+from .live_ipc import LiveRuntimePanel
 from .workers import WorkerHub
 from .window import GatewayPage, VirtualMappings
 from .catalog_drawer import SignalCatalogDrawer
@@ -426,7 +427,8 @@ class MappingWorkspace(QWidget):
 
 
 class LiveWorkspace(QWidget):
-    def __init__(self, project, hub, notify, runtime, simulation=False, parent=None):
+    def __init__(self, project, hub, notify, runtime, simulation=False,
+                 parent=None, runtime_endpoint=None):
         super().__init__(parent)
         self.project, self.hub, self.notify, self.runtime = project, hub, notify, runtime
         self.simulation = simulation
@@ -449,16 +451,28 @@ class LiveWorkspace(QWidget):
         if not simulation:
             toolbar.addWidget(action("Copy Diagnostics", self.copy_diagnostics))
         lay.addLayout(toolbar)
-        self.provider = TelemetrySource(project.source(self.instance_id), simulation=simulation)
-        self.model = ReadOnlySignalModel(self.provider, hub, self.instance_id, self)
-        self.grid = QTableView()
-        self.grid.setModel(self.model)
-        self.grid.setAlternatingRowColors(True)
-        self.grid.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
-        self.grid.horizontalHeader().setStretchLastSection(True)
-        self.grid.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        lay.addWidget(self.grid, 1)
-        self.model.failure.connect(notify)
+        # Exactly one data model per mode: do not construct a hidden 500k-row
+        # offline TelemetrySource when actual runtime IPC monitoring is active.
+        self.live_panel = (LiveRuntimePanel(hub, runtime_endpoint, self)
+                           if runtime_endpoint is not None and not simulation else None)
+        self.provider = None
+        self.model = None
+        self.grid = None
+        if self.live_panel is not None:
+            lay.addWidget(self.live_panel, 1)
+            self.status.setText("TEST IPC · READ ONLY")
+        else:
+            self.provider = TelemetrySource(project.source(self.instance_id),
+                                            simulation=simulation)
+            self.model = ReadOnlySignalModel(self.provider, hub, self.instance_id, self)
+            self.grid = QTableView()
+            self.grid.setModel(self.model)
+            self.grid.setAlternatingRowColors(True)
+            self.grid.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
+            self.grid.horizontalHeader().setStretchLastSection(True)
+            self.grid.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            lay.addWidget(self.grid, 1)
+            self.model.failure.connect(notify)
         if simulation:
             b = QHBoxLayout()
             b.addWidget(QLabel("Selected signal · proposed value"))
@@ -476,7 +490,11 @@ class LiveWorkspace(QWidget):
             lay.addLayout(b)
             self.caption = QLabel("No values transmitted. Real source remains unaffected; field controls blocked.")
         else:
-            self.caption = QLabel("No runtime connection · unavailable does NOT mean value zero or quality Good.")
+            self.caption = QLabel(
+                "Test IPC client · live values only from the connected headless runtime. "
+                "No configuration deployment or field controls."
+                if self.live_panel is not None else
+                "No runtime connection · unavailable does NOT mean value zero or quality Good.")
         self.caption.setObjectName("Muted")
         lay.addWidget(self.caption)
 
@@ -485,6 +503,10 @@ class LiveWorkspace(QWidget):
         iid = node.instance_id
         scope = node.scope_id if node.kind == "scope" else ""
         self.instance_id, self.scope_id = iid, scope
+        if self.live_panel is not None:
+            self.context_label.setText(
+                "Runtime Global · offline explorer selection is NOT a signal filter")
+            return
         self.context_label.setText(self.project.demo.instance(iid).name +
                                    ("  /  "+node.title if scope else "  /  All Signals"))
         self.provider = TelemetrySource(self.project.source(iid, scope), self.simulation)
@@ -514,6 +536,14 @@ class LiveWorkspace(QWidget):
         self.notify("Cleared local previews; runtime simulation was never active")
 
     def copy_diagnostics(self):
+        if self.live_panel is not None:
+            text = ("ARPY runtime monitoring · TEST IPC only\n"
+                    f"State: {self.live_panel.current_state}\n"
+                    f"Visible signals: {len(self.live_panel.values.rows)}\n"
+                    "No tokens, device passwords, or raw IPC envelopes exported.")
+            QApplication.clipboard().setText(text)
+            self.notify("Copied redacted runtime viewer state")
+            return
         QApplication.clipboard().setText(self.runtime.diagnostics())
         self.notify("Copied redacted offline diagnostic summary")
 
@@ -530,11 +560,12 @@ class WorkspaceTabs(QTabBar):
 class StudioV2Window(QMainWindow):
     WORKSPACES = ("Gateway Config", "Protocol Config", "Protocol Signals",
                   "Protocol Mapping", "Protocol Monitoring", "Value Simulation")
-    def __init__(self, demo=None, parent=None):
+    def __init__(self, demo=None, parent=None, *, runtime_endpoint=None):
         super().__init__(parent)
         self.project = EngineeringView(demo or DemoProvider())
         self.hub = WorkerHub(self)
         self.runtime = DisconnectedRuntime(self.project.demo)
+        self.runtime_endpoint = runtime_endpoint  # developer-only test endpoint
         self.context = SelectionContext()
         self.setWindowTitle("ARPY Gateway Studio · Protocol Engineering Preview")
         self.resize(1450, 850)
@@ -610,7 +641,8 @@ class StudioV2Window(QMainWindow):
         self.signals = SignalWorkspace(self.project, self.hub, self.notify,
                                        self.on_mappings_changed)
         self.mapping = MappingWorkspace(self.project, self.hub, self.notify)
-        self.monitor = LiveWorkspace(self.project, self.hub, self.notify, self.runtime)
+        self.monitor = LiveWorkspace(self.project, self.hub, self.notify, self.runtime,
+                                     runtime_endpoint=self.runtime_endpoint)
         self.simulation = LiveWorkspace(self.project, self.hub, self.notify,
                                         self.runtime, simulation=True)
         for widget in (self.gateway, self.config, self.signals, self.mapping,
@@ -665,6 +697,11 @@ class StudioV2Window(QMainWindow):
             return
         self.context.workspace = workspace
         self.pages.setCurrentIndex(workspace)
+        if self.monitor.live_panel is not None:
+            if workspace == 4:
+                self.monitor.live_panel.activate()
+            else:
+                self.monitor.live_panel.deactivate()
         if workspace != 2 and self.catalog_drawer.is_open:
             self.close_catalog()
         self.refresh_explorer()
@@ -756,5 +793,7 @@ class StudioV2Window(QMainWindow):
         self.statusBar().showMessage(str(msg).splitlines()[0], 12000)
 
     def closeEvent(self, event):
+        if self.monitor.live_panel is not None:
+            self.monitor.live_panel.shutdown()
         self.hub.shutdown()
         super().closeEvent(event)

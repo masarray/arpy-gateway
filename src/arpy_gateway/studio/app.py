@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import os
 from .demo import DemoProvider
 
 
@@ -22,7 +23,17 @@ def main(argv=None):
     app.setOrganizationName("ARPY")
     demo = DemoProvider()
     demo.resize_demo(opts.demo_rows)
-    win = StudioV2Window(demo)
+    # Developer/CI fixture only: production runtime endpoints must be
+    # provisioned securely by the installer + OS IPC service, never through
+    # a GUI port/password form, command-line token or a runtime pip install.
+    endpoint = None
+    port_text = os.environ.get("ARPY_STUDIO_TEST_IPC_PORT", "")
+    token = os.environ.get("ARPY_IPC_TEST_TOKEN", "")
+    if port_text.isdecimal() and len(token) >= 32:
+        port = int(port_text)
+        if 1 <= port <= 65535:
+            endpoint = (port, token)
+    win = StudioV2Window(demo, runtime_endpoint=endpoint)
     win.show()
     if opts.screenshot:
         def capture():

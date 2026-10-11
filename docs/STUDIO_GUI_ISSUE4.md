@@ -45,6 +45,20 @@ Same explorer and full signal catalog as Protocol Monitoring. Previewing selecte
 
 `studio/design_tokens.py` is the only owner of semantic light/dark palette, typography, density scale, row height, sidebar/explorer widths and QSS. Semantic colors for success/warning/error/focus, neutral surfaces and high-density tables are centralized. No heavy QSS on 500k individual cells, no large decorative cards, and no per-cell QWidget.
 
+## P17.1 — Live Runtime Value Viewer integration (stacked GUI PR, developer test mode)
+
+The read-only IPC integration in `studio/live_ipc.py` is **separate from the offline engineering signal catalog**. Without an authenticated runtime endpoint it preserves the previous honest offline/Unavailable behavior. When an integration-test endpoint is supplied, Protocol Monitoring uses a dedicated `LiveRuntimePanel` and does **not** instantiate a hidden demo telemetry grid or assume preview IDs match deployed signal IDs.
+
+**What is implemented:** Qt `QAbstractTableModel` for up to 128 real runtime signal rows per IPC snapshot, plus a bounded Device Status table of stable device/instance IDs; actual server-provided value/quality/observed UTC/origin/sequence, paging and global cursor/delta through `ViewportSession` from IPC draft PR #19. IPC calls run on `WorkerHub` read workers only (no network I/O on Qt GUI thread); one nonoverlapping request at a time; timer active only when the Monitoring tab is selected; stale worker results discarded on tab/page changes. Runtime IPC loss clears previously Good rows and reports disconnected, **not** a fabricated quality. Closing Studio cancels only its own viewer/timer, never runtime adapter sockets or the service process.
+
+**Scope accuracy:** the runtime IPC currently publishes a **global signal page, not a server-side per-IED filter**. The live panel explicitly says the offline explorer IED selection does not scope runtime values. Introducing an incorrect per-IED join by matching visible row index/address/name is forbidden. Per-connection filtering/name metadata requires Store #3, RFC #13 and reviewed IPC contract additions. Value Simulation remains local preview only with physical controls disabled.
+
+**Developer QA only (NOT customer configuration):** `ARPY_STUDIO_TEST_IPC_PORT` and `ARPY_IPC_TEST_TOKEN` may be supplied by controlled integration tests to attach the GUI to the locally running read-only test endpoint. The token is never shown or copied in diagnostics. **Production must NOT read credentials from a user-visible form or demand PowerShell/pip commands**: install + OS-managed runtime service with ACL-restricted authenticated local IPC/secure automatic discovery is a separate issue #8/#10 requirement. Wrong/missing test parameters retain an offline UI.
+
+**Cross-PR CI verification:** Linux GUI suite overlays the **pinned source** of PR #19 commit `eb926024751bebdf728c6174869a4d31fdcca762` only inside the CI checkout (not a merge) and launches its headless deterministic fixture as a separate OS process. Qt tests validate actual `signals.page/signals.delta` responses, reconnect, viewer detach/tab switch, and daemon survival after GUI closes. Windows unsigned engineering-preview EXE bundles only the pure IPC *client*, **not** the gateway daemon, real protocol adapters or a Windows Service installer.
+
+**Next acceptance:** a separate GUI/IPC/Modbus end-to-end test must join the pinned Modbus PR #15 real TCP transport with PR #19 headless runtime and this Qt viewer; user-ready Save Draft / Validate / Deploy remains blocked by approved Store #3 / RFC #13. Do not claim end-user gateway functionality, installer auto-start, physical RTU tests or redundancy from this GUI integration alone.
+
 ## Deliberate boundaries / unfinished integration
 
 - **No persistent project database**: new peers/stations/signals/assignments are session-only mock records, not revisioned engineering snapshots. Full indexed arbitrary substring search, durable changes, transaction rollback and ownership reassignment remain owned by Store #3 / RFC #13.
