@@ -6,7 +6,7 @@ RFC #13 / STORE #3 / IPC #8 / SIM #9 provide production implementations.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QModelIndex, QAbstractTableModel, Signal, QTimer
+from PySide6.QtCore import Qt, QEvent, QModelIndex, QAbstractTableModel, Signal, QTimer
 from PySide6.QtWidgets import (
     QApplication, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel,
@@ -620,10 +620,14 @@ class StudioV2Window(QMainWindow):
         splitter.setChildrenCollapsible(False)
         splitter.setSizes([232, 1190])
         line.addWidget(splitter, 1)
-        self.catalog_drawer = SignalCatalogDrawer(self.project, self.hub, self.notify)
-        line.addWidget(self.catalog_drawer, 0)
+        # Non-modal overlay; never resize/reflow the large IEC104 signal grid.
+        self.workspace_surface = horizontal
+        self.catalog_drawer = SignalCatalogDrawer(self.project, self.hub,
+                                                  self.notify, horizontal)
         frame.addWidget(horizontal, 1)
         self.setCentralWidget(central)
+        horizontal.installEventFilter(self)
+        self.catalog_drawer.sync_parent_geometry()
 
         self.navigation.currentChanged.connect(self._workspace_changed)
         self.gateway.changed.connect(self.refresh_explorer)
@@ -661,7 +665,7 @@ class StudioV2Window(QMainWindow):
             return
         self.context.workspace = workspace
         self.pages.setCurrentIndex(workspace)
-        if workspace != 2 and self.catalog_drawer.maximumWidth() > 0:
+        if workspace != 2 and self.catalog_drawer.is_open:
             self.close_catalog()
         self.refresh_explorer()
 
@@ -741,6 +745,12 @@ class StudioV2Window(QMainWindow):
         if match.isValid():
             self.tree.setCurrentIndex(match)
         self.back_button.setEnabled(bool(self.context.back))
+
+    def eventFilter(self, watched, event):
+        if (watched is getattr(self, "workspace_surface", None)
+                and event.type() == QEvent.Type.Resize):
+            self.catalog_drawer.sync_parent_geometry()
+        return super().eventFilter(watched, event)
 
     def notify(self, msg):
         self.statusBar().showMessage(str(msg).splitlines()[0], 12000)

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from threading import RLock
 import re
 
-from PySide6.QtCore import (Qt, QAbstractTableModel, QModelIndex, QEasingCurve,
+from PySide6.QtCore import (Qt, QPoint, QAbstractTableModel, QModelIndex, QEasingCurve,
                             QPropertyAnimation, Signal)
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QPushButton,
@@ -292,12 +292,14 @@ class SignalCatalogDrawer(QFrame):
         self.station_id = ""
         self._selection_epoch = 0
         self._selected = ()
-        self._animation = QPropertyAnimation(self, b"maximumWidth", self)
+        self._open = False
+        self._animation = QPropertyAnimation(self, b"pos", self)
         self._animation.setDuration(190)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.setMaximumWidth(0)
-        self.setMinimumWidth(0)
+        self.setFixedWidth(self.WIDTH)
         self._build()
+        self.hide()
+        self._animation.finished.connect(self._finish_animation)
 
     def _build(self):
         lay = QVBoxLayout(self)
@@ -512,8 +514,47 @@ class SignalCatalogDrawer(QFrame):
             source_id, scope_id, ids, target_id, station_id, ioa, ti),
             done, write=True, error=fail)
 
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
+    def sync_parent_geometry(self):
+        """Reposition on window resize without rebuilding signal/editor models."""
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        self.setFixedHeight(parent.height())
+        x = max(0, parent.width() - self.width()) if self._open else parent.width()
+        self.move(x, 0)
+        if self._open:
+            self.raise_()
+
+    def _finish_animation(self):
+        if not self._open:
+            self.hide()
+
     def slide(self, visible: bool, width: int | None = None):
+        """Animate the drawer over the right-hand editor, not inside layout.
+
+        A single QPropertyAnimation moves one QFrame. No full-table layout
+        reflows and no per-signal widgets are allocated during transition.
+        """
+        parent = self.parentWidget()
+        if parent is None:
+            return
         self._animation.stop()
-        self._animation.setStartValue(self.maximumWidth())
-        self._animation.setEndValue(width or self.WIDTH if visible else 0)
+        if visible:
+            self.setFixedWidth(min(int(width or self.WIDTH), max(370, parent.width() - 185)))
+            self.setFixedHeight(parent.height())
+            if not self._open:
+                self.move(parent.width(), 0)
+            self._open = True
+            self.show()
+            self.raise_()
+            end = QPoint(parent.width() - self.width(), 0)
+        else:
+            self._open = False
+            end = QPoint(parent.width(), 0)
+        self._animation.setStartValue(self.pos())
+        self._animation.setEndValue(end)
         self._animation.start()

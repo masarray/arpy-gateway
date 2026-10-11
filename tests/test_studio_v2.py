@@ -158,7 +158,7 @@ class StudioV2UiTests(unittest.TestCase):
         self.win.tree.setCurrentIndex(self.win.tree_model.find("scada104:ca:1"))
         self.win.signals.assign_button.click()
         drawer = self.win.catalog_drawer
-        await_ui(lambda: drawer.maximumWidth() >= 400)
+        await_ui(lambda: drawer.is_open and drawer.isVisible() and drawer.pos().x() < self.win.workspace_surface.width())
         self.assertTrue(drawer.isVisible())
         self.assertEqual(drawer.table.model().columnCount(), 4)
         drawer.connection.setCurrentIndex(drawer.connection.findData("meter01:ied:2"))
@@ -191,7 +191,7 @@ class StudioV2UiTests(unittest.TestCase):
         self.assertEqual(tuple(x.source_signal_id for x in routes),
                          ("meter01:signal:0000501", "meter01:signal:0000720",
                           "meter01:signal:0000899"))
-        await_ui(lambda: drawer.maximumWidth() == 0)
+        await_ui(lambda: not drawer.is_open and not drawer.isVisible())
         self.assertLessEqual(len(drawer.model._pages), MAX_CATALOG_PAGES)
 
     def test_catalog_large_search_does_not_materialize_dataset(self):
