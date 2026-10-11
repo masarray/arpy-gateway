@@ -70,7 +70,7 @@ class AdapterRuntime:
         self._state = "STARTING"
         try:
             await self._adapter.start(self._instance, self._signals)
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             self._state = "FAILED_TO_START"
             # Partial transport initialization may already own a socket/COM
             # handle. Run bounded cleanup while preserving original failure.
