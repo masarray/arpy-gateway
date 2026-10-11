@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from arpy_gateway.contracts.ipc import API_VERSION, Envelope, MessageKind
-from .framing import receive, send
+from .framing import IPCFrameError, receive, send
 
 
 class IPCRemoteError(Exception):
