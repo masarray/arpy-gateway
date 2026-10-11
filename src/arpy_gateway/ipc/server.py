@@ -103,9 +103,14 @@ class LocalReadOnlyServer:
         if method == "hello":
             if params:
                 raise RequestFault("BAD_PARAMETERS")
+            capabilities = ["health", "signals.page", "signals.delta", "diagnostics"]
+            has_view = getattr(self.runtime, "has_device_view", None)
+            if callable(getattr(self.runtime, "device_page", None)) and (
+                    has_view is None or has_view()):
+                capabilities.append("devices.page")
             return {"api_version": API_VERSION,
-                    "transport": "loopback_fixture_only",
-                    "capabilities": ["health", "signals.page", "signals.delta", "diagnostics"],
+                    "transport": "loopback_read_only_test",
+                    "capabilities": capabilities,
                     "mutable_operations": False,
                     "source": self.runtime.health().get("source", "UNKNOWN")}
         if method == "health":
@@ -124,6 +129,17 @@ class LocalReadOnlyServer:
                 raise RequestFault("BAD_PARAMETERS")
             try:
                 return self.runtime.delta(**params)
+            except (TypeError, ValueError):
+                raise RequestFault("BAD_PARAMETERS") from None
+        if method == "devices.page":
+            has_view = getattr(self.runtime, "has_device_view", None)
+            if not callable(getattr(self.runtime, "device_page", None)) or (
+                    has_view is not None and not has_view()):
+                raise RequestFault("OPERATION_NOT_SUPPORTED")
+            if set(params) != {"offset", "limit"}:
+                raise RequestFault("BAD_PARAMETERS")
+            try:
+                return self.runtime.device_page(**params)
             except (TypeError, ValueError):
                 raise RequestFault("BAD_PARAMETERS") from None
         if method == "diagnostics":

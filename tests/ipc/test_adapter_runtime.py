@@ -98,6 +98,37 @@ class AdapterBridgeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
+    async def test_cancelled_partial_start_releases_open_resources(self):
+        class WaitingPort(FakePort):
+            async def start(self, instance, signals):
+                self.started = True
+                await asyncio.Event().wait()
+        adapter = WaitingPort()
+        runtime = AdapterRuntime(make_instance(), (signal("a"),), adapter)
+        pending = asyncio.create_task(runtime.start())
+        await asyncio.sleep(.03)
+        pending.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await pending
+        self.assertTrue(adapter.stopped)
+        self.assertEqual(runtime.health()["state"], "FAILED_TO_START")
+
+    async def test_unimplemented_device_status_not_advertised_by_stub_adapter(self):
+        fake = FakePort()
+        runtime = AdapterRuntime(make_instance(), (signal("a"),), fake)
+        server = LocalReadOnlyServer(runtime, token=TOKEN)
+        await runtime.start()
+        port = await server.start()
+        try:
+            hello = await request(port, TOKEN, "hello")
+            self.assertNotIn("devices.page", hello["capabilities"])
+            from arpy_gateway.ipc.client import IPCRemoteError
+            with self.assertRaisesRegex(IPCRemoteError, "OPERATION_NOT_SUPPORTED"):
+                await request(port, TOKEN, "devices.page", {"offset": 0, "limit": 1})
+        finally:
+            await server.stop()
+            await runtime.stop()
+
     async def test_delta_invalidated_on_stream_failure_and_no_fake_good(self):
         fake = FakePort()
         runtime = AdapterRuntime(make_instance(), (signal("a"),), fake)
