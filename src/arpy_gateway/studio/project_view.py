@@ -275,6 +275,82 @@ class EngineeringView:
             return tuple(created)
 
 
+    def assign_selected(self, source_instance: str, source_scope: str,
+                        selected_ids: tuple[str, ...], target_instance: str,
+                        station_id: str, ioa_start: int, ti: int) -> tuple[str, ...]:
+        """Atomically bind explicit selected stable signal IDs, never row ranges."""
+        ids = tuple(selected_ids)
+        if not 1 <= len(ids) <= MAX_ASSIGN or len(ids) != len(set(ids)):
+            raise ValueError("Select 1–2000 unique source signal rows")
+        if source_instance == target_instance or ti not in (1, 3, 9, 11, 13, 35):
+            raise ValueError("Invalid cross-protocol monitoring assignment")
+        if not 0 <= ioa_start <= 16777215 or ioa_start + len(ids) > 16777216:
+            raise ValueError("IOA range outside IEC-104 address space")
+        target = self.demo.instance(target_instance)
+        source = self.demo.instance(source_instance)
+        if target.protocol != "iec104" or target.role is not InstanceRole.SERVER:
+            raise ValueError("Select an IEC-104 Server destination")
+        station = next((x for x in self.stations(target_instance) if x.id == station_id), None)
+        if station is None:
+            raise ValueError("Destination must be a local ASDU station, not a master peer")
+        prefix = f"{source_instance}:signal:"
+        indexes = []
+        for sid in ids:
+            try:
+                idx = int(sid[len(prefix):]) - 1 if sid.startswith(prefix) else -1
+            except ValueError:
+                idx = -1
+            if idx < 0 or idx >= self.demo.instance_count(source_instance):
+                raise ValueError("Unknown source signal ID")
+            if sid != self.demo.signal_id(source_instance, idx):
+                raise ValueError("Malformed source signal ID")
+            if source_scope and self.owner_for(source_instance, idx) != source_scope:
+                raise ValueError("Selected signal no longer belongs to selected IED")
+            indexes.append(idx)
+        with self._lock, self.demo._lock:
+            used = {int(self.demo._get(target, i, "ioa"))
+                    for (iid, i), owner in self._extra_owners.items()
+                    if iid == target_instance and owner == station_id}
+            if any(ioa in used for ioa in range(ioa_start, ioa_start + len(indexes))):
+                raise ValueError("Duplicate IEC-104 IOA in the selected ASDU station")
+            for idx in indexes:
+                family = self.demo._get(source, idx, "family")
+                if (ti in (1, 3) and family != "binary") or (
+                        ti not in (1, 3) and family != "analog"):
+                    raise ValueError("Selected source family incompatible with IEC-104 TI")
+            old_added = self.demo._added.get(target_instance, 0)
+            old_mappings = len(self.demo._mappings)
+            old_history, old_redo = list(self.demo._history), list(self.demo._redo)
+            created, indexes_to_rollback, changes = [], [], []
+            try:
+                for offset, source_idx in enumerate(indexes):
+                    label = str(self.demo._get(source, source_idx, "name"))
+                    sid, index = self.demo.append_signal(target_instance, "Mapped / " + label[:220])
+                    created.append(sid)
+                    indexes_to_rollback.append(index)
+                    self._extra_owners[(target_instance, index)] = station_id
+                    for key, value in (("common_address", station.address),
+                                       ("ioa", ioa_start + offset), ("ti", str(ti)),
+                                       ("family", "binary" if ti in (1, 3) else "analog"),
+                                       ("value_type", "bool" if ti in (1, 3) else
+                                        "int16" if ti in (9, 11, 35) else "float32")):
+                        changes.append((sid, key, value))
+                self.demo.edit(target_instance, changes)
+                self.demo.bind_explicit(source_instance, target_instance,
+                                        list(zip(indexes, indexes_to_rollback)))
+            except Exception:
+                del self.demo._mappings[old_mappings:]
+                self.demo._history[:] = old_history
+                self.demo._redo[:] = old_redo
+                self.demo._added[target_instance] = old_added
+                for index in indexes_to_rollback:
+                    self._extra_owners.pop((target_instance, index), None)
+                    for field in self.demo.fields(target_instance):
+                        self.demo._overrides.pop((target_instance, index, field.key), None)
+                raise
+            return tuple(created)
+
+
 def _cumulative_mod_count(length: int, residue: int) -> int:
     full, tail = divmod(length, ADDRESS_MOD)
     return full * (residue + 1) + min(tail, residue + 1)
