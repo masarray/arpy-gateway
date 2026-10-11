@@ -343,10 +343,6 @@ class SignalWorkspace(QWidget):
         if node.kind == "peer" and self.project.demo.instance(iid).protocol == "iec104":
             scope = ""  # IEC104 remote master is not signal owner
         self.instance_id, self.scope_id = iid, scope
-        if self.live_panel is not None:
-            self.context_label.setText(
-                "Runtime Global · offline explorer selection is NOT a signal filter")
-            return
         self.context_label.setText(self.project.demo.instance(iid).name +
                                    ("  /  " + node.title if scope else "  /  All Signals"))
         self.model.demo = self.project.source(iid, scope)
@@ -499,6 +495,10 @@ class LiveWorkspace(QWidget):
         iid = node.instance_id
         scope = node.scope_id if node.kind == "scope" else ""
         self.instance_id, self.scope_id = iid, scope
+        if self.live_panel is not None:
+            self.context_label.setText(
+                "Runtime Global · offline explorer selection is NOT a signal filter")
+            return
         self.context_label.setText(self.project.demo.instance(iid).name +
                                    ("  /  "+node.title if scope else "  /  All Signals"))
         self.provider = TelemetrySource(self.project.source(iid, scope), self.simulation)
