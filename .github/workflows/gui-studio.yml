@@ -8,6 +8,7 @@ on:
       - 'src/arpy_gateway/studio/**'
       - 'tests/test_studio_gui.py'
       - 'tests/test_studio_v2.py'
+      - 'tests/test_studio_live_ipc.py'
       - '.github/workflows/gui-studio.yml'
       - 'pyproject.toml'
   workflow_dispatch:
@@ -31,6 +32,16 @@ jobs:
           sudo apt-get install -y -qq libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0
       - name: Install optional Studio package
         run: python -m pip install -e ".[studio]"
+      - name: Overlay pinned IPC runtime read model (PR #19, CI only)
+        shell: bash
+        run: |
+          git fetch --no-tags origin feat/8-modbus-runtime-integration
+          pinned="eb926024751bebdf728c6174869a4d31fdcca762"
+          test "$(git rev-parse FETCH_HEAD)" = "$pinned"
+          git checkout "$pinned" -- src/arpy_gateway/ipc src/arpy_gateway/runtime/service
+          echo "Pinned IPC client and fixture imported from $pinned"
+      - name: Validate read-only IPC module imports
+        run: python -c "from arpy_gateway.ipc.client import ViewportSession; print('Versioned IPC viewer client ready')"
       - name: Compile source and tests
         run: python -m compileall -q src tests
       - name: Run domain contract and new GUI tests
@@ -152,6 +163,15 @@ jobs:
           cache: pip
       - name: Install GUI and packager
         run: python -m pip install -e ".[studio]" pyinstaller
+      - name: Bundle pinned IPC read client (no gateway daemon or protocol stack)
+        shell: bash
+        run: |
+          git fetch --no-tags origin feat/8-modbus-runtime-integration
+          pinned="eb926024751bebdf728c6174869a4d31fdcca762"
+          test "$(git rev-parse FETCH_HEAD)" = "$pinned"
+          git checkout "$pinned" -- src/arpy_gateway/ipc
+      - name: Verify IPC viewer dependency
+        run: python -c "from arpy_gateway.ipc.client import ViewportSession; print('IPC client import OK')"
       - name: Build unsigned GUI-only application
         run: pyinstaller --noconfirm --clean --onefile --windowed --name ARPY-Gateway-Studio-Preview --paths src src/arpy_gateway/studio/launcher.py
       - name: Upload Windows preview
