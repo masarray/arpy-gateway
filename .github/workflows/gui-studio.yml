@@ -201,7 +201,13 @@ jobs:
         run: python -c "from arpy_gateway.studio.sqlite_window import SQLiteStudioWindow; from arpy_gateway.studio.sqlite_project import SQLiteEngineeringProject; print('SQLite-first production GUI available')"
       - name: Compile Studio, Store and pinned protocol client
         run: python -m compileall -q src tests/test_studio_saved_devices.py
-      - name: Qt regression including IPC/actual Modbus + Add/Edit/SQLite Reopen
+      - name: Fast Windows regression - SQLite IED Explorer and persisted signal ownership
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_studio_sqlite_authoritative.py' -v
+      - name: Full Windows regression - Qt, Modbus TCP wire, IPC, Store, GUI
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: src
@@ -210,7 +216,9 @@ jobs:
         run: python -c "from arpy_gateway.studio.persisted_devices import TCPDeviceRepository; print('SQLite Store isolated from gateway OS service')"
 
   windows-preview:
-    name: Windows portable engineering-only EXE
+    # Build once per review/final gate, not after every iterative push.
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    name: Windows portable SQLite engineering EXE
     needs: windows-gui-tests
     runs-on: windows-latest
     steps:
