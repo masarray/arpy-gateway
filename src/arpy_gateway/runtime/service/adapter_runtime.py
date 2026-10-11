@@ -162,6 +162,9 @@ class AdapterRuntime:
                 "generation": self._changes.generation,
                 "cursor": self._changes.cursor}
 
+    def has_device_view(self) -> bool:
+        return callable(getattr(self._adapter, "device_page", None))
+
     def device_page(self, *, offset: int, limit: int):
         """Read-only paged transport-health capability if adapter exports it."""
         page = getattr(self._adapter, "device_page", None)
