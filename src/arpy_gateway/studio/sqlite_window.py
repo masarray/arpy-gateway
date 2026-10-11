@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt, QModelIndex, QAbstractTableModel
 from PySide6.QtWidgets import (
     QApplication, QAbstractItemView, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QMainWindow, QPushButton, QSpinBox, QSplitter,
+    QLabel, QLineEdit, QMainWindow, QPushButton, QSpinBox, QDoubleSpinBox, QSplitter,
     QStackedWidget, QTableView, QTreeView, QVBoxLayout, QWidget,
 )
 from .design_tokens import apply_theme
@@ -63,6 +63,10 @@ class SignalEditDialog(QDialog):
             ["float32","uint16","int16","float64","uint32","int32","bool"])
         self.table=QComboBox();self.table.addItems(["holding","input","coil","discrete"])
         self.address=QSpinBox();self.address.setRange(0,65535)
+        self.byte_order=QComboBox();self.byte_order.addItems(["big","little"])
+        self.word_order=QComboBox();self.word_order.addItems(["big","little"])
+        self.scale=QDoubleSpinBox();self.scale.setRange(-1000000,1000000)
+        self.scale.setDecimals(6);self.scale.setValue(1.0)
         self.unit=QLineEdit(current.unit if current else "")
         self.enabled=QCheckBox("Enabled");self.enabled.setChecked(
             current.enabled if current else True)
@@ -71,10 +75,15 @@ class SignalEditDialog(QDialog):
             self.dtype.setCurrentText(current.value_type.value)
             self.table.setCurrentText(current.parameters.get("register_table","holding"))
             self.address.setValue(int(current.parameters.get("native_address",0)))
+            self.byte_order.setCurrentText(str(current.parameters.get("byte_order","big")))
+            self.word_order.setCurrentText(str(current.parameters.get("word_order","big")))
+            self.scale.setValue(float(current.parameters.get("scale",1.0)))
         for caption,field in (
             ("Signal name",self.name),("Family",self.family),
             ("Value type",self.dtype),("Register table",self.table),
-            ("Native 0-based address",self.address),("Unit",self.unit),
+            ("Native 0-based address",self.address),
+            ("Byte Order",self.byte_order),("Word Order",self.word_order),
+            ("Scaling Factor",self.scale),("Unit",self.unit),
             ("Enabled",self.enabled)):
             form.addRow(caption,field)
         lay.addLayout(form)
@@ -90,6 +99,9 @@ class SignalEditDialog(QDialog):
                 "value_type":self.dtype.currentText(),"direction":"inbound",
                 "register_table":self.table.currentText(),
                 "native_address":self.address.value(),
+                "byte_order":self.byte_order.currentText(),
+                "word_order":self.word_order.currentText(),
+                "scale":self.scale.value(),
                 "unit":self.unit.text(),"enabled":self.enabled.isChecked()}
 
 
@@ -248,10 +260,14 @@ class SQLiteStudioWindow(QMainWindow):
             bar.addWidget(btn)
         bar.addStretch();s.addLayout(bar)
         self.signal_model=ReadModel(
-            ("Name","Family","Value type","Table","Native Addr","Unit","Owner ID","Signal ID"),
+            ("Name","Family","Value type","Table","Native Addr","Byte Order",
+             "Word Order","Scale","Unit","Owner ID","Signal ID"),
             lambda r:(r[0].name,r[0].family.value,r[0].value_type.value,
                       r[0].parameters.get("register_table","—"),
                       r[0].parameters.get("native_address","—"),
+                      r[0].parameters.get("byte_order","big"),
+                      r[0].parameters.get("word_order","big"),
+                      r[0].parameters.get("scale",1.0),
                       r[0].unit,r[1] or r[2] or "Unassigned",r[0].id),self)
         self.signals=self._table(self.signal_model)
         self.signals.selectionModel().currentChanged.connect(lambda *_:self._buttons())

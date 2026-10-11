@@ -199,10 +199,19 @@ class SQLiteEngineeringProject:
         family = SignalFamily(record["family"])
         dtype = ValueType(record["value_type"])
         direction = SignalDirection(record["direction"])
-        params = {
-            "register_table":str(record["register_table"]),
-            "native_address":int(record["native_address"]),
-        }
+        params = dict(original.parameters) if original is not None else {}
+        params.update({
+            "register_table": str(record["register_table"]),
+            "native_address": int(record["native_address"]),
+            "byte_order": str(record.get("byte_order","big")),
+            "word_order": str(record.get("word_order","big")),
+            "scale": float(record.get("scale",1.0)),
+        })
+        if params["byte_order"] not in ("big","little") or params["word_order"] not in ("big","little"):
+            raise ValueError("Modbus endian order must be big/little")
+        from math import isfinite
+        if not isfinite(params["scale"]):
+            raise ValueError("Scale must be finite")
         if params["register_table"] not in ("holding","input","coil","discrete"):
             raise ValueError("Unsupported Modbus register table")
         if not 0 <= params["native_address"] <= 65535:
