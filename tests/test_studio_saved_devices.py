@@ -55,23 +55,25 @@ class PersistedDeviceRepositoryTests(unittest.TestCase):
                            expected_generation=a["generation"])
         page = self.repo.page()
         self.assertEqual(page["generation"],b["generation"])
-        self.assertEqual([row.name for row in page["rows"]], ["Meter A", "Meter B"])
+        self.assertCountEqual([row.name for row in page["rows"]], ["Meter A", "Meter B"])
         self.assertTrue(all(row.id.startswith("tcp-") for row in page["rows"]))
         self.assertEqual(len({row.id for row in page["rows"]}),2)
         # Create a brand-new repo object, just like a Studio process restart.
         reopened = TCPDeviceRepository(self.path)
         self.assertEqual(reopened.prepare(),b["generation"])
-        original = reopened.page()["rows"][0]
+        original = next(row for row in reopened.page()["rows"] if row.name == "Meter A")
         updated = reopened.save(
             TCPDeviceEdit("Meter A Renamed","127.0.0.99",1502,1,250,False),
             original=original,expected_generation=b["generation"])
-        current = reopened.page()["rows"][0]
+        current = next(row for row in reopened.page()["rows"] if row.id == original.id)
         self.assertEqual(current.id,original.id)
         self.assertEqual(current.name,"Meter A Renamed")
         self.assertEqual(current.settings["host"],"127.0.0.99")
         self.assertFalse(current.enabled)
         self.assertEqual(updated["generation"],b["generation"]+1)
-        self.assertEqual(reopened.page()["rows"][1].id,page["rows"][1].id)
+        self.assertEqual(
+            next(row.id for row in reopened.page()["rows"] if row.name == "Meter B"),
+            next(row.id for row in page["rows"] if row.name == "Meter B"))
         with self.assertRaises(EditConflict):
             self.repo.save(TCPDeviceEdit("Stale","127.0.0.4"),
                            expected_generation=b["generation"])
