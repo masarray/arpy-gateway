@@ -50,6 +50,19 @@ class AdapterRuntime:
         self._started: datetime | None = None
         self._error: str | None = None
         self._failure_at: datetime | None = None
+        self._monitor_sink = None
+
+    @property
+    def signal_ids(self) -> tuple[str, ...]:
+        return self._ids
+
+    def set_change_sink(self, sink):
+        """Attach a fleet monitor callback only before adapter startup."""
+        if self._state != "UNCONFIGURED":
+            raise RuntimeError("Cannot attach monitor after runtime start")
+        if sink is not None and not callable(sink):
+            raise TypeError("monitor sink must be callable")
+        self._monitor_sink = sink
 
     async def start(self):
         if self._state != "UNCONFIGURED":
@@ -89,6 +102,8 @@ class AdapterRuntime:
                 self._latest[sample.signal_id] = sample
                 self._received += 1
                 self._changes.mark(index)
+                if self._monitor_sink is not None:
+                    self._monitor_sink(index)
             if self._state == "RUNNING":
                 self._mark_link_failed("SAMPLE_STREAM_ENDED")
         except asyncio.CancelledError:
@@ -103,6 +118,8 @@ class AdapterRuntime:
         self._error = reason
         self._failure_at = datetime.now(timezone.utc)
         self._changes.invalidate()
+        if self._monitor_sink is not None:
+            self._monitor_sink(None)
         # Unseen samples remain unavailable; no invented zero or fresh Good.
 
     async def stop(self):
