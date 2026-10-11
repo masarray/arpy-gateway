@@ -59,6 +59,22 @@ def stylesheet(t: ThemeTokens) -> str:
     QWidget#Sidebar, QWidget#ExplorerPanel {{
       background: {sidebar}; border-right: 1px solid {border};
     }}
+    QFrame#AppHeader {{ background: {surface}; border-bottom: 1px solid {border}; }}
+    QTabBar#WorkspaceTabs {{ background: {surface}; border: none; }}
+    QTabBar#WorkspaceTabs::tab {{
+      color: {muted}; background: {surface}; border: none;
+      border-bottom: 2px solid transparent;
+      padding: 9px 12px; margin-right: 3px; font-weight: 500;
+    }}
+    QTabBar#WorkspaceTabs::tab:selected {{
+      color: {primary}; background: {surface}; border-bottom-color: {primary};
+    }}
+    QTabBar#WorkspaceTabs::tab:hover:!selected {{
+      color: {text}; background: {hover};
+    }}
+    QFrame#SignalCatalogDrawer {{
+      background: {surface}; border-left: 1px solid {border};
+    }}
     QFrame#Panel, QFrame#Summary {{
       background: {surface}; border: 1px solid {border};
       border-radius: 6px;

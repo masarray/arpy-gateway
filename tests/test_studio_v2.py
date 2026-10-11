@@ -88,6 +88,24 @@ class ProtocolTopologyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.project.assign_catalog("meter01", "", 0, "scada104", dest, 2400, 1, 45)
 
+    def test_assign_arbitrary_noncontiguous_catalog_signal_ids(self):
+        target = self.project.stations("scada104")[0].id
+        chosen = ("meter01:signal:0000501", "meter01:signal:0000720",
+                  "meter01:signal:0000899")
+        created = self.project.assign_selected("meter01", "meter01:ied:2",
+                                               chosen, "scada104", target, 4001, 13)
+        self.assertEqual(len(created), 3)
+        self.assertEqual(tuple(m.source_signal_id for m in self.demo.mappings()), chosen)
+        self.assertEqual(tuple(m.destination_signal_id for m in self.demo.mappings()), created)
+        self.assertEqual(self.demo._get(self.demo.instance("scada104"), 1001, "ioa"), 4002)
+        with self.assertRaises(ValueError):
+            self.project.assign_selected("meter01", "meter01:ied:1", chosen,
+                                         "scada104", target, 7001, 13)
+        with self.assertRaises(ValueError):
+            self.project.assign_selected("meter01", "meter01:ied:2", chosen,
+                                         "scada104", target, 4002, 13)
+        self.assertEqual(self.demo.mappings_count(), 3)
+
     def test_modbus_native_address_sort_uses_numeric_order_without_materializing(self):
         low, high = 29900, 30125
         sorted_indexes = sorted(range(low, high), key=lambda i: (i % 30000, i//30000))
@@ -129,6 +147,63 @@ class StudioV2UiTests(unittest.TestCase):
         self.assertIn(DARK.surface, APP.styleSheet())
         self.win.theme.setCurrentIndex(0)
         self.assertIn(LIGHT.canvas, APP.styleSheet())
+
+    def test_compact_top_tabs_and_drawer_catalog_search_assignment(self):
+        from arpy_gateway.studio.catalog_drawer import CatalogSource, MAX_CATALOG_PAGES
+        from PySide6.QtCore import QItemSelection, QItemSelectionModel
+        self.assertEqual(self.win.navigation.count(), 6)
+        self.assertEqual(self.win.navigation.objectName(), "WorkspaceTabs")
+        self.assertIsNone(self.win.findChild(type(self.win.navigation), "Sidebar"))
+        self.win.navigation.setCurrentRow(2)
+        self.win.tree.setCurrentIndex(self.win.tree_model.find("scada104:ca:1"))
+        self.win.signals.assign_button.click()
+        drawer = self.win.catalog_drawer
+        await_ui(lambda: drawer.maximumWidth() >= 400)
+        self.assertTrue(drawer.isVisible())
+        self.assertEqual(drawer.table.model().columnCount(), 4)
+        drawer.connection.setCurrentIndex(drawer.connection.findData("meter01:ied:2"))
+        drawer.search.setText("addr:1000")
+        drawer.refresh_search()
+        await_ui(lambda: drawer.model.rowCount() == 1)
+        await_ui(lambda: 0 in drawer.model._pages)
+        self.assertEqual(drawer.model.data(drawer.model.index(0, 2)), "1000  ·  HOLDING")
+        self.assertEqual(drawer.model.data(drawer.model.index(0, 0)),
+                         "Meter02 / Voltage 000501")
+        drawer.search.setText("voltage 000720")
+        drawer.refresh_search()
+        await_ui(lambda: drawer.model.rowCount() == 1)
+        drawer.search.clear()
+        drawer.refresh_search()
+        await_ui(lambda: drawer.model.rowCount() == 500)
+        selection = QItemSelection()
+        selection.select(drawer.model.index(0, 0), drawer.model.index(0, 3))
+        selection.select(drawer.model.index(219, 0), drawer.model.index(219, 3))
+        selection.select(drawer.model.index(398, 0), drawer.model.index(398, 3))
+        drawer.table.selectionModel().select(
+            selection, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+        await_ui(lambda: drawer.preview.rowCount() == 3)
+        self.assertEqual(drawer.preview.data(drawer.preview.index(1, 2)), "1002")
+        drawer.ioa.setValue(4501)
+        await_ui(lambda: drawer.preview.data(drawer.preview.index(2, 2)) == "4503")
+        drawer.commit.click()
+        await_ui(lambda: self.win.project.demo.mappings_count() == 3)
+        routes = self.win.project.demo.mappings()
+        self.assertEqual(tuple(x.source_signal_id for x in routes),
+                         ("meter01:signal:0000501", "meter01:signal:0000720",
+                          "meter01:signal:0000899"))
+        await_ui(lambda: drawer.maximumWidth() == 0)
+        self.assertLessEqual(len(drawer.model._pages), MAX_CATALOG_PAGES)
+
+    def test_catalog_large_search_does_not_materialize_dataset(self):
+        from arpy_gateway.studio.catalog_drawer import CatalogSource
+        self.win.project.demo.resize_demo(500_000)
+        source = CatalogSource(self.win.project, "meter01", "meter01:ied:2")
+        start = time.monotonic()
+        view = source.lookup("addr:1000")
+        self.assertEqual(view.total, 8)
+        self.assertLess(time.monotonic() - start, 1.5)
+        self.assertEqual(len(source.page(0, 8, view)), 8)
+        self.assertFalse(hasattr(self.win.project.demo, "_signals"))
 
     def test_protocol_signal_editor_follows_selected_device(self):
         self.win.navigation.setCurrentRow(2)
