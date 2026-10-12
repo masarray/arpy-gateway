@@ -55,23 +55,24 @@ class PersistedDeviceRepositoryTests(unittest.TestCase):
                            expected_generation=a["generation"])
         page = self.repo.page()
         self.assertEqual(page["generation"],b["generation"])
-        self.assertEqual([row.name for row in page["rows"]], ["Meter A", "Meter B"])
+        self.assertEqual({row.name for row in page["rows"]}, {"Meter A", "Meter B"})
         self.assertTrue(all(row.id.startswith("tcp-") for row in page["rows"]))
         self.assertEqual(len({row.id for row in page["rows"]}),2)
         # Create a brand-new repo object, just like a Studio process restart.
         reopened = TCPDeviceRepository(self.path)
         self.assertEqual(reopened.prepare(),b["generation"])
-        original = reopened.page()["rows"][0]
+        original = next(p for p in reopened.page()["rows"] if p.id == a["id"])
         updated = reopened.save(
             TCPDeviceEdit("Meter A Renamed","127.0.0.99",1502,1,250,False),
             original=original,expected_generation=b["generation"])
-        current = reopened.page()["rows"][0]
+        current = next(p for p in reopened.page()["rows"] if p.id == original.id)
         self.assertEqual(current.id,original.id)
         self.assertEqual(current.name,"Meter A Renamed")
         self.assertEqual(current.settings["host"],"127.0.0.99")
         self.assertFalse(current.enabled)
         self.assertEqual(updated["generation"],b["generation"]+1)
-        self.assertEqual(reopened.page()["rows"][1].id,page["rows"][1].id)
+        self.assertEqual({p.id for p in reopened.page()["rows"]},
+                         {p.id for p in page["rows"]})
         with self.assertRaises(EditConflict):
             self.repo.save(TCPDeviceEdit("Stale","127.0.0.4"),
                            expected_generation=b["generation"])
@@ -147,6 +148,62 @@ class SavedDeviceWidgetTests(unittest.TestCase):
             modal.accept()
         QTimer.singleShot(60,set_fields)
 
+    def test_ied_connections_reads_only_sqlite_and_reappears_on_startup(self):
+        """Regression for actual field-user report: no separate Saved button."""
+        from arpy_gateway.studio.persisted_devices import TCPDeviceRepository, TCPDeviceEdit
+        repo=TCPDeviceRepository(self.path)
+        panel=self.panel
+        self.assertFalse(hasattr(self.win.config, "saved_devices_button"))
+        self.assertEqual(self.win.project.points("meter01"), ())
+        before=panel.generation
+        result=repo.save(TCPDeviceEdit("Power Meter A","192.168.1.12",502,1,1000),
+                         expected_generation=before)
+        panel.load()
+        await_ui(lambda: (not panel._busy and panel.generation==result["generation"]
+                          and len(self.win.project.points("meter01"))==1))
+        recorded=self.win.project.points("meter01")[0]
+        self.assertEqual(recorded.name,"Power Meter A")
+        self.assertEqual(recorded.params()["host"],"192.168.1.12")
+        self.win.refresh_explorer("peers:meter01")
+        node=self.win.tree_model.find("peers:meter01")
+        self.assertTrue(node.isValid())
+        self.win.tree.setCurrentIndex(node)
+        self.assertIs(self.win.config.stack.currentWidget(),panel)
+        self.assertTrue(self.win.tree_model.find(recorded.id).isValid())
+        # Reopening a brand-new Studio instance must populate Explorer/IED
+        # Connections without clicking an auxiliary "Saved Modbus" button.
+        self.win.close()
+        APP.processEvents()
+        reopened=StudioV2Window(engineering_db_path=self.path)
+        try:
+            reopened.show()
+            await_ui(lambda: (len(reopened.project.points("meter01"))==1 and
+                              not reopened.config.saved_devices._busy))
+            target=reopened.project.points("meter01")[0]
+            self.assertEqual((target.id,target.name, target.params()["host"]),
+                             (recorded.id,"Power Meter A","192.168.1.12"))
+            reopened.navigation.setCurrentRow(1)
+            await_ui(lambda: reopened.tree_model.find(target.id).isValid())
+            container=reopened.tree_model.find("peers:meter01")
+            reopened.tree.setCurrentIndex(container)
+            self.assertIs(reopened.config.stack.currentWidget(),
+                          reopened.config.saved_devices)
+            self.assertEqual(reopened.config.saved_devices.model.rows[0].id,target.id)
+            # Changing an IED name must retain the stable ID in both views.
+            repo2=TCPDeviceRepository(self.path)
+            edited=repo2.save(TCPDeviceEdit("Power Meter Renamed","192.168.1.25"),
+                              original=repo2.page()["rows"][0],
+                              expected_generation=repo2.page()["generation"])
+            reopened.config.saved_devices.load()
+            await_ui(lambda: (reopened.config.saved_devices.generation==
+                              edited["generation"] and
+                              reopened.project.points("meter01")[0].name==
+                              "Power Meter Renamed"))
+            self.assertEqual(reopened.project.points("meter01")[0].id,target.id)
+        finally:
+            reopened.close()
+            APP.processEvents()
+
     def test_add_edit_and_reopen_without_deploying(self):
         self.assertIsNone(self.win.monitor.live_panel)
         self._complete_dialog(name="Station Meter 01",host="127.0.0.11")
@@ -165,7 +222,8 @@ class SavedDeviceWidgetTests(unittest.TestCase):
         self.assertEqual(self.panel.model.rows[0].id,first.id)
         # Simulator and offline source table remain separate; data was not
         # artificially copied into the old demo EngineeringView.
-        self.assertEqual(len(self.win.project.points("meter01")),2)
+        self.assertEqual(len(self.win.project.points("meter01")),1)
+        self.assertEqual(self.win.project.points("meter01")[0].id, first.id)
         self.win.close()
         APP.processEvents()
         new=StudioV2Window(engineering_db_path=self.path)

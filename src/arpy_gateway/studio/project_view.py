@@ -98,6 +98,27 @@ class EngineeringView:
         items = self.demo.instances()
         return items if include_disabled else tuple(x for x in items if x.enabled)
 
+    def install_saved_modbus_points(self, stored, *, instance_id="meter01"):
+        """Replace demo peers in the GUI projection with actual SQLite IDs.
+
+        Called on the Qt thread AFTER a bounded Store worker reads a page.
+        This is a view projection, not an alternative mutable repository.
+        No example IED is allowed to appear in production engineering scope.
+        """
+        with self._lock:
+            old = self._peers.get(instance_id, ())
+            for item in old:
+                self._point_by_id.pop(item.id, None)
+            points = [CommunicationPoint(
+                item.id, instance_id, item.name, "modbus_ied",
+                tuple({**dict(item.settings), "enabled": item.enabled}.items()))
+                for item in stored]
+            self._peers[instance_id] = points
+            self._point_by_id.update((item.id, item) for item in points)
+            # Never reuse deterministic demo signal row ranges to suggest real
+            # ownership of saved IEDs: DB SignalBinding is authoritative.
+            self._seeded[instance_id] = ()
+
     def points(self, instance_id: str) -> tuple[CommunicationPoint, ...]:
         with self._lock:
             return tuple(self._peers.get(instance_id, ()))

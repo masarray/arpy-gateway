@@ -167,14 +167,8 @@ class ProtocolConfigWorkspace(QWidget):
         self.breadcrumb = QLabel("Select a protocol from the explorer")
         self.breadcrumb.setObjectName("SectionTitle")
         lay.addWidget(self.breadcrumb)
-        if engineering_db_path is not None:
-            self.saved_devices_button = action(
-                "Saved Modbus Devices (SQLite)", self.show_saved_devices, True)
-            self.saved_devices_button.setToolTip(
-                "Persistent engineering draft, independent of demonstration catalog")
-            lay.addWidget(self.saved_devices_button)
-        else:
-            self.saved_devices_button = None
+        # No second "Saved Modbus" page/button: IED Connections is the
+        # database-backed editor, not an independent demo configuration.
         self.stack = QStackedWidget()
         lay.addWidget(self.stack, 1)
 
@@ -236,6 +230,14 @@ class ProtocolConfigWorkspace(QWidget):
                               if engineering_db_path is not None else None)
         if self.saved_devices is not None:
             self.stack.addWidget(self.saved_devices)
+            self.saved_devices.devices_changed.connect(self._saved_peers_loaded)
+
+    def _saved_peers_loaded(self, rows):
+        # Rebuild the Explorer from the same Store snapshot as the table.
+        # The Store remains the only persistent authority.
+        self.project.install_saved_modbus_points(rows)
+        if self.topology_changed is not None:
+            self.topology_changed()
 
     def show_saved_devices(self):
         if self.saved_devices is None:
@@ -255,10 +257,16 @@ class ProtocolConfigWorkspace(QWidget):
             self._build_form(iid)
             self.stack.setCurrentIndex(1)
         elif node.kind in ("peers", "peer"):
-            self.peers_model.select(iid, node.scope_id if node.kind == "peer" else "")
-            self.peer_title.setText("Master Connections" if self.project.demo.instance(iid).protocol == "iec104"
-                                    else "IED / Slave Connections")
-            self.stack.setCurrentIndex(2)
+            if iid == "meter01" and self.saved_devices is not None:
+                self.stack.setCurrentWidget(self.saved_devices)
+                self.saved_devices.activate()
+                if node.kind == "peer":
+                    self.saved_devices.select_device(node.scope_id)
+            else:
+                self.peers_model.select(iid, node.scope_id if node.kind == "peer" else "")
+                self.peer_title.setText("Master Connections" if self.project.demo.instance(iid).protocol == "iec104"
+                                        else "IED / Slave Connections")
+                self.stack.setCurrentIndex(2)
         elif node.kind in ("stations", "station"):
             self.stations_model.select(iid, node.scope_id if node.kind == "station" else "")
             self.stack.setCurrentIndex(3)
@@ -296,6 +304,10 @@ class ProtocolConfigWorkspace(QWidget):
         iid = self.current.instance_id
         label = "SCADA Master" if self.project.demo.instance(iid).protocol == "iec104" else "IED"
         name = f"New {label} {len(self.project.points(iid))+1}"
+        if iid == "meter01" and self.saved_devices is not None:
+            self.saved_devices.activate()
+            self.saved_devices.add_device()
+            return
         self.hub.submit(lambda: self.project.add_point(iid, name, "127.0.0.1"),
                         lambda _: (self.peers_model.select(iid),
                                    self.topology_changed(self.current.key),
@@ -587,6 +599,9 @@ class StudioV2Window(QMainWindow):
                  engineering_db_path=None):
         super().__init__(parent)
         self.project = EngineeringView(demo or DemoProvider())
+        if engineering_db_path is not None:
+            # Do not display seeded demo IEDs during asynchronous DB startup.
+            self.project.install_saved_modbus_points(())
         self.hub = WorkerHub(self)
         self.runtime = DisconnectedRuntime(self.project.demo)
         self.runtime_endpoint = runtime_endpoint  # developer-only test endpoint
@@ -597,6 +612,9 @@ class StudioV2Window(QMainWindow):
         self.setMinimumSize(1040, 620)
         self._build()
         apply_theme(QApplication.instance(), "light")
+        if self.config.saved_devices is not None:
+            # Populate the Explorer on launch; never wait for a special button.
+            QTimer.singleShot(0, self.config.saved_devices.activate)
 
     def _build(self):
         # Horizontal navigation replaces the wasteful fixed-width left sidebar.
