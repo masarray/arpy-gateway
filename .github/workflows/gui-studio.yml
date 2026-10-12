@@ -2,7 +2,7 @@ name: Studio GUI - Issue 4
 
 on:
   push:
-    branches: ['feat/gui-*']
+    branches: ['feat/gui-*', 'fix/gui-*']
   pull_request:
     paths:
       - 'src/arpy_gateway/studio/**'
@@ -11,6 +11,7 @@ on:
       - 'tests/test_studio_live_ipc.py'
       - 'tests/test_studio_modbus_ipc.py'
       - 'tests/test_studio_saved_devices.py'
+      - 'tests/test_studio_sqlite_authoritative.py'
       - '.github/workflows/gui-studio.yml'
       - 'pyproject.toml'
   workflow_dispatch:
@@ -66,7 +67,7 @@ jobs:
       - name: Capture offline GUI screenshot
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m arpy_gateway.studio --screenshot artifacts/arpy-studio-gateway-config.png
+        run: python -m arpy_gateway.studio --demo --screenshot artifacts/arpy-studio-gateway-config.png
       - name: Capture 500k-signal workspace screenshot
         env:
           QT_QPA_PLATFORM: offscreen
@@ -196,9 +197,17 @@ jobs:
           git fetch --no-tags origin feat/store-revisioned-sqlite-issue3
           test "$(git rev-parse FETCH_HEAD)" = "8868f715f27b7eb36fd2740be24493576a27b306"
           git checkout FETCH_HEAD -- src/arpy_gateway/engineering
+      - name: Assert installed launcher uses persisted SQLite, not DemoProvider
+        run: python -c "from arpy_gateway.studio.sqlite_window import SQLiteStudioWindow; from arpy_gateway.studio.sqlite_project import SQLiteEngineeringProject; print('SQLite-first production GUI available')"
       - name: Compile Studio, Store and pinned protocol client
         run: python -m compileall -q src tests/test_studio_saved_devices.py
-      - name: Qt regression including IPC/actual Modbus + Add/Edit/SQLite Reopen
+      - name: Fast Windows regression - SQLite IED Explorer and persisted signal ownership
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_studio_sqlite_authoritative.py' -v
+      - name: Full Windows regression - Qt, Modbus TCP wire, IPC, Store, GUI
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: src
@@ -207,7 +216,9 @@ jobs:
         run: python -c "from arpy_gateway.studio.persisted_devices import TCPDeviceRepository; print('SQLite Store isolated from gateway OS service')"
 
   windows-preview:
-    name: Windows portable engineering-only EXE
+    # Build once per review/final gate, not after every iterative push.
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    name: Windows portable SQLite engineering EXE
     needs: windows-gui-tests
     runs-on: windows-latest
     steps:
@@ -242,10 +253,17 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -c "from pathlib import Path; import subprocess; p=Path('artifacts/windows-standalone-studio.png'); p.parent.mkdir(parents=True,exist_ok=True); subprocess.run(['dist/ARPY-Gateway-Studio-Preview.exe','--screenshot',str(p)],check=True,timeout=90); assert p.is_file() and p.stat().st_size>1000, 'Standalone EXE failed GUI screenshot smoke'"
+      - name: Upload Windows SQLite GUI startup screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARPY-Unified-SQLite-Studio-Windows-QA-Screenshot
+          path: artifacts/windows-standalone-studio.png
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload Windows preview
         uses: actions/upload-artifact@v4
         with:
-          name: ARPY-Gateway-Studio-Windows-Saved-Devices-Preview
+          name: ARPY-Gateway-Studio-Windows-Unified-SQLite-Preview
           path: dist/ARPY-Gateway-Studio-Preview.exe
           if-no-files-found: error
           retention-days: 14
